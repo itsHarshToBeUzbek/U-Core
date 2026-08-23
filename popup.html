@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; }
+
+    :root {
+      --ink: #17131F;
+      --ink-soft: #57506B;
+      --ink-faint: #8D86A3;
+      --paper: #F6F4FA;
+      --surface: #FFFFFF;
+      --line: #E7E2F0;
+      --line-soft: #F1EEF7;
+      --brand: #7000FF;
+      --brand-deep: #4A00B0;
+      --brand-soft: #F1E7FF;
+      --good: #147A54;
+      --good-soft: #E1F5EA;
+      --warn: #A85A17;
+      --warn-soft: #FBEEDC;
+      --bad: #C11F3E;
+      --bad-soft: #FCE6EA;
+      --radius-s: 6px;
+      --radius-m: 10px;
+      --radius-l: 16px;
+      --shadow-1: 0 1px 2px rgba(23,19,31,.05);
+      --shadow-2: 0 10px 28px -10px rgba(23,19,31,.20);
+      --font-ui: 'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      --font-mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Consolas, monospace;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      * { transition: none !important; animation: none !important; }
+    }
+
+    html, body { margin: 0; padding: 0; }
+    body {
+      width: 528px;
+      font-family: var(--font-ui);
+      background: var(--paper);
+      color: var(--ink);
+      -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
+    }
+
+    :focus-visible {
+      outline: 2px solid var(--brand);
+      outline-offset: 2px;
+      border-radius: 4px;
+    }
+
+    /* ---------- Вкладки ---------- */
+    .tabs {
+      display: flex;
+      gap: 4px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--line);
+      padding: 12px 14px 0;
+      position: sticky;
+      top: 0;
+      z-index: 5;
+    }
+    .tab-btn {
+      flex: 1;
+      padding: 10px 0 12px;
+      border: none;
+      background: none;
+      font-family: var(--font-ui);
+      font-weight: 700;
+      font-size: 13px;
+      letter-spacing: .01em;
+      color: var(--ink-faint);
+      cursor: pointer;
+      border-bottom: 2.5px solid transparent;
+      margin-bottom: -1px;
+      transition: color .15s ease, border-color .15s ease;
+    }
+    .tab-btn:hover { color: var(--brand-deep); }
+    .tab-btn.active { color: var(--brand); border-bottom-color: var(--brand); }
+
+    .tab-content { display: none; padding: 10px 12px; max-height: 600px; overflow-y: auto; }
+    .tab-content.active { display: block; }
+
+    /* ---------- Панели ---------- */
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-m);
+      padding: 11px 14px 6px;
+      margin-bottom: 8px;
+      box-shadow: var(--shadow-1);
+    }
+    .panel h2 {
+      margin: 0 0 6px 0;
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--ink);
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+    .panel h2::before {
+      content: '';
+      width: 6px; height: 6px;
+      border-radius: 2px;
+      background: var(--brand);
+      flex-shrink: 0;
+    }
+    .panel h2.panel__h2--quiet { color: var(--ink-soft); font-size: 12px; }
+    .panel h2.panel__h2--quiet::before { background: var(--ink-faint); }
+    .panel--quiet { background: var(--line-soft); border-color: var(--line); box-shadow: none; }
+
+    /* ---------- Таблица номиналов ---------- */
+    .table-head, .row {
+      display: grid;
+      grid-template-columns: 84px 1fr 70px 70px;
+      align-items: center;
+      gap: 6px;
+    }
+    .table-head {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+      color: var(--ink-faint);
+      border-bottom: 1px solid var(--line);
+      padding: 0 0 6px 14px;
+    }
+    .table-head > div:not(:first-child) { text-align: center; }
+
+    .row {
+      position: relative;
+      padding: 5px 2px 5px 14px;
+      border-bottom: 1px solid var(--line-soft);
+      font-family: var(--font-mono);
+      font-size: 12.5px;
+      font-variant-numeric: tabular-nums;
+    }
+    .row:last-child { border-bottom: none; }
+    .row::before {
+      content: '';
+      position: absolute;
+      left: 2px; top: 6px; bottom: 6px;
+      width: 4px;
+      border-radius: 2px;
+    }
+    /* Условный градиент "по номиналу" — от глубокого фиолетового (крупные
+       купюры) к светлому сиреневому (мелкие), в духе того, как кассир
+       раскладывает купюры по стопкам. Не претендует на точные цвета
+       настоящих банкнот — это стилизованная шкала по величине номинала. */
+    #bill-inputs .row:nth-child(1)::before { background: hsl(266 82% 38%); }
+    #bill-inputs .row:nth-child(2)::before { background: hsl(271 78% 45%); }
+    #bill-inputs .row:nth-child(3)::before { background: hsl(276 76% 52%); }
+    #bill-inputs .row:nth-child(4)::before { background: hsl(281 74% 59%); }
+    #bill-inputs .row:nth-child(5)::before { background: hsl(286 71% 66%); }
+    #bill-inputs .row:nth-child(6)::before { background: hsl(291 66% 72%); }
+    #bill-inputs .row:nth-child(7)::before { background: hsl(296 61% 78%); }
+    #bill-inputs .row:nth-child(8)::before { background: hsl(301 56% 84%); }
+
+    .row:hover { background: var(--line-soft); }
+
+    .readonly-box { text-align: center; font-weight: 600; color: var(--ink-soft); }
+
+    /* ---------- Числовые поля ---------- */
+    input[type="number"]::-webkit-outer-spin-button,
+    input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    input[type="number"] { -moz-appearance: textfield; }
+
+    input[type="number"], input[type="text"], input[type="date"] {
+      font-family: var(--font-mono);
+      font-size: 12.5px;
+      font-variant-numeric: tabular-nums;
+      color: var(--ink);
+      border: 1.5px solid transparent;
+      border-radius: var(--radius-s);
+      outline: none;
+      transition: border-color .12s ease, background-color .12s ease, box-shadow .12s ease;
+    }
+    input[type="text"], input[type="date"], select, textarea {
+      font-family: var(--font-ui);
+    }
+
+    #bill-inputs input[type="number"] {
+      width: 100%;
+      background: var(--brand-soft);
+      padding: 6px 6px;
+      text-align: center;
+      font-weight: 600;
+    }
+    #bill-inputs input[type="number"]:focus {
+      background: var(--surface);
+      border-color: var(--brand);
+      box-shadow: 0 0 0 3px var(--brand-soft);
+    }
+
+    /* ---------- Карточка-ведомость (чек) ---------- */
+    .ledger {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-m);
+      margin-bottom: 10px;
+      box-shadow: var(--shadow-2);
+      overflow: hidden;
+    }
+    .ledger__perf {
+      height: 9px;
+      background-image: radial-gradient(circle at 8px 9px, var(--paper) 4px, transparent 4.2px);
+      background-size: 16px 9px;
+      background-repeat: repeat-x;
+      background-color: var(--surface);
+    }
+    .ledger__body {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 2px 20px;
+      padding: 4px 14px 12px;
+    }
+    .ledger__col { display: flex; flex-direction: column; gap: 3px; }
+    .ledger__row, .ledger__chip-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      min-height: 24px;
+    }
+    .ledger__label { font-size: 11.5px; color: var(--ink-soft); font-weight: 600; }
+    .ledger__value {
+      font-family: var(--font-mono);
+      font-weight: 700;
+      font-size: 13px;
+      font-variant-numeric: tabular-nums;
+      color: var(--ink);
+    }
+    .ledger__value--big { font-size: 15px; }
+    .ledger__input {
+      width: 104px;
+      text-align: right;
+      background: var(--brand-soft);
+      padding: 5px 8px;
+      font-weight: 700;
+    }
+    .ledger__input:focus {
+      background: var(--surface);
+      border-color: var(--brand);
+      box-shadow: 0 0 0 3px var(--brand-soft);
+    }
+    .ledger__input::placeholder { color: var(--ink-faint); font-weight: 500; }
+    .ledger__divider { border: none; border-top: 1px dashed var(--line); margin: 3px 0; height: 0; }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      padding: 3px 10px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 700;
+      white-space: nowrap;
+      background: var(--good-soft);
+      color: var(--good);
+      transition: background-color .15s ease, color .15s ease;
+    }
+    .chip[data-state="warn"] { background: var(--warn-soft); color: var(--warn); }
+    .chip[data-state="bad"]  { background: var(--bad-soft);  color: var(--bad); }
+
+    /* ---------- Перенос данных (второстепенный блок) ---------- */
+    .transfer-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .transfer-textarea {
+      width: 100%; min-height: 54px;
+      font-family: var(--font-mono); font-size: 11px; line-height: 1.4;
+      padding: 7px 9px; margin-bottom: 8px;
+      border: 1px solid var(--line); border-radius: var(--radius-s);
+      background: var(--surface); color: var(--ink);
+      resize: vertical;
+    }
+    .transfer-textarea:focus { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-soft); }
+    .transfer-status { font-size: 11px; font-weight: 700; min-height: 14px; }
+    .transfer-hint { font-size: 11px; color: var(--ink-faint); margin-top: 2px; padding-bottom: 6px; }
+
+    .btn-secondary {
+      background: var(--surface); color: var(--ink-soft);
+      border: 1px solid var(--line);
+      padding: 7px 12px; border-radius: var(--radius-s);
+      font-family: var(--font-ui); font-weight: 700; font-size: 11.5px;
+      cursor: pointer; white-space: nowrap;
+      transition: border-color .12s ease, color .12s ease, background-color .12s ease;
+    }
+    .btn-secondary:hover { border-color: var(--brand); color: var(--brand-deep); background: var(--brand-soft); }
+
+    /* ---------- Инфолисты ---------- */
+    .form-group { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; }
+    .form-group label { font-size: 11.5px; font-weight: 700; color: var(--ink-soft); }
+
+    input[type="text"], input[type="date"], select, textarea {
+      padding: 8px 10px; border: 1.5px solid var(--line);
+      border-radius: var(--radius-s); font-size: 13px;
+      background: var(--surface); color: var(--ink);
+      width: 100%;
+    }
+    input[type="text"]:focus, input[type="date"]:focus, select:focus, textarea:focus {
+      border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-soft);
+    }
+    textarea { resize: vertical; min-height: 100px; font-family: var(--font-ui); line-height: 1.5; }
+    select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%2357506B' stroke-width='2'%3E%3Cpath d='M6 8l4 4 4-4'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; padding-right: 30px; }
+
+    .btn-main {
+      width: 100%; background: var(--brand); color: #fff; border: none;
+      padding: 13px; border-radius: var(--radius-s);
+      font-family: var(--font-ui); font-weight: 700; font-size: 14px;
+      cursor: pointer; margin-top: 4px; margin-bottom: 8px;
+      display: flex; justify-content: center; align-items: center; gap: 8px;
+      transition: background-color .12s ease, transform .06s ease, box-shadow .12s ease;
+      box-shadow: 0 4px 14px -4px rgba(112,0,255,.45);
+    }
+    .btn-main:hover { background: var(--brand-deep); }
+    .btn-main:active { transform: translateY(1px); box-shadow: 0 2px 8px -3px rgba(112,0,255,.4); }
+  </style>
+</head>
+<body>
+
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="tab-incasso">Инкассация</button>
+    <button class="tab-btn" data-tab="tab-infolist">Инфолисты</button>
+  </div>
+
+  <!-- Вкладка 1: КАЛЬКУЛЯТОР -->
+  <div id="tab-incasso" class="tab-content active">
+    <div class="panel">
+      <h2>Калькулятор инкассации</h2>
+      <div class="table-head">
+        <div>Номинал</div>
+        <div>Факт (ПВЗ)</div>
+        <div>Инкассация</div>
+        <div>Сдача</div>
+      </div>
+      <div id="bill-inputs"></div>
+    </div>
+
+    <div class="ledger">
+      <div class="ledger__perf" aria-hidden="true"></div>
+      <div class="ledger__body">
+        <div class="ledger__col">
+          <div class="ledger__row">
+            <span class="ledger__label">Сумма в WMS</span>
+            <input type="number" id="wms-total" value="0" class="ledger__input">
+          </div>
+          <div class="ledger__row">
+            <span class="ledger__label">Номер сумки</span>
+            <input type="number" id="bag-number" value="" placeholder="—" class="ledger__input">
+          </div>
+          <hr class="ledger__divider">
+          <div class="ledger__row">
+            <span class="ledger__label">Итог факт</span>
+            <span class="ledger__value ledger__value--big" id="total-fact">0</span>
+          </div>
+          <div class="ledger__row">
+            <span class="ledger__label">Инкассация</span>
+            <span class="ledger__value" id="total-encash">0</span>
+          </div>
+          <div class="ledger__row">
+            <span class="ledger__label">Сдача</span>
+            <span class="ledger__value" id="total-change">0</span>
+          </div>
+        </div>
+        <div class="ledger__col">
+          <div class="ledger__row">
+            <span class="ledger__label">Разница</span>
+            <span class="ledger__value" id="diff">0</span>
+          </div>
+          <hr class="ledger__divider">
+          <div class="ledger__chip-row">
+            <span class="ledger__label">Вердикт</span>
+            <span class="chip" id="verdict" data-state="ok">✅ Всё сошлось</span>
+          </div>
+          <div class="ledger__chip-row">
+            <span class="ledger__label">Контроль</span>
+            <span class="chip" id="control" data-state="ok">✅ Всё сошлось</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel panel--quiet">
+      <h2 class="panel__h2--quiet">Перенос данных на другой компьютер</h2>
+
+      <div class="transfer-row">
+        <button id="btn-export" class="btn-secondary">Экспортировать</button>
+        <button id="btn-copy-export" class="btn-secondary">Скопировать</button>
+        <span id="export-status" class="transfer-status"></span>
+      </div>
+      <textarea id="export-output" class="transfer-textarea" readonly placeholder="Нажмите «Экспортировать» — здесь появится код для передачи"></textarea>
+
+      <textarea id="import-input" class="transfer-textarea" placeholder="Вставьте сюда код, полученный с другого компьютера..."></textarea>
+      <div class="transfer-row">
+        <button id="btn-import" class="btn-secondary">Импортировать</button>
+        <span id="import-status" class="transfer-status"></span>
+      </div>
+      <div class="transfer-hint">⚠️ Импорт перезапишет текущие купюры, сумму WMS и номер сумки на этом устройстве.</div>
+    </div>
+  </div>
+
+  <!-- Вкладка 2: ИНФОЛИСТЫ -->
+  <div id="tab-infolist" class="tab-content">
+    <div class="panel" style="padding-top: 15px;">
+
+      <div class="form-group">
+        <label>Тип инфолиста</label>
+        <select id="doc-type-select"></select>
+      </div>
+
+      <div style="display: flex; gap: 10px;">
+        <div class="form-group" style="flex: 1;">
+          <label>ПВЗ Отправитель</label>
+          <input type="text" id="input-sender" value="ТАШ-120">
+        </div>
+        <div class="form-group" style="flex: 1;">
+          <label>Дата отправки</label>
+          <input type="date" id="input-date">
+        </div>
+      </div>
+
+      <div class="form-group dynamic-field" id="group-receiver">
+        <label>Куда</label>
+        <input type="text" id="input-receiver" value="На склад Ташкента">
+      </div>
+
+      <div class="form-group dynamic-field" id="group-gm" style="display: none;">
+        <label>ГМ короба</label>
+        <input type="text" id="input-gm" placeholder="Например: 85-0008335216">
+      </div>
+
+      <div class="form-group dynamic-field" id="group-order" style="display: none;">
+        <label>Номер заказа</label>
+        <input type="text" id="input-order" placeholder="Например: 120590584">
+      </div>
+
+      <div class="form-group dynamic-field" id="group-barcode" style="display: none;">
+        <label>ШК товара</label>
+        <input type="text" id="input-barcode" placeholder="Например: 1000107336070">
+      </div>
+
+      <div class="form-group dynamic-field" id="group-unknown_count" style="display: none;">
+        <label>Количество товаров без ШК</label>
+        <input type="number" id="input-unknown_count" value="0">
+      </div>
+
+      <div class="form-group dynamic-field" id="group-list" style="display: none;">
+        <label id="label-list">Номера заказов/ШК товаров:</label>
+        <textarea id="input-items" placeholder="Каждый номер с новой строки..."></textarea>
+      </div>
+
+      <button id="btn-print" class="btn-main">
+        <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path></svg>
+        Напечатать
+      </button>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
