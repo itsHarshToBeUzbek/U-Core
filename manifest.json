@@ -1,0 +1,45 @@
+{
+  "manifest_version": 3,
+  "name": "Uzum ПВЗ Помощник",
+  "version": "1.1.0",
+  "description": "Калькулятор инкассации и печать инфолистов",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Открыть помощника",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://dp.uzum.uz/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://dp.uzum.uz/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "uzum_logo.png"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ]
+}
