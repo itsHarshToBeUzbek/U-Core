@@ -54,37 +54,120 @@
       border-radius: 4px;
     }
 
-    /* ---------- Вкладки ---------- */
+    /* ---------- Вкладки (Google-style) ---------- */
     .tabs {
-      display: flex;
-      gap: 4px;
-      background: var(--surface);
-      border-bottom: 1px solid var(--line);
-      padding: 12px 14px 0;
       position: sticky;
       top: 0;
       z-index: 5;
+      display: flex;
+      align-items: flex-end;
+      background: var(--surface);
+      border-bottom: 1px solid var(--line);
+      padding: 8px 10px 0;
+      overflow-x: auto;
+      overflow-y: hidden;
+      scrollbar-width: none;
+      -ms-overflow-style: none;
     }
+    .tabs::-webkit-scrollbar { display: none; }
+
     .tab-btn {
-      flex: 1;
-      padding: 10px 0 12px;
+      position: relative;
+      flex: 0 0 auto;
+      padding: 9px 13px 11px;
       border: none;
       background: none;
       font-family: var(--font-ui);
       font-weight: 700;
-      font-size: 13px;
+      font-size: 12.5px;
       letter-spacing: .01em;
+      white-space: nowrap;
       color: var(--ink-faint);
       cursor: pointer;
-      border-bottom: 2.5px solid transparent;
-      margin-bottom: -1px;
-      transition: color .15s ease, border-color .15s ease;
+      border-radius: var(--radius-s) var(--radius-s) 0 0;
+      isolation: isolate;
+      transition: color .18s cubic-bezier(.4,0,.2,1);
+    }
+    /* Скругленная подложка при наведении/фокусе — растёт и появляется */
+    .tab-btn::before {
+      content: '';
+      position: absolute;
+      inset: 3px 2px 6px;
+      z-index: -1;
+      border-radius: 8px;
+      background: var(--brand-soft);
+      opacity: 0;
+      transform: scale(.9);
+      transition: opacity .18s cubic-bezier(.4,0,.2,1), transform .18s cubic-bezier(.4,0,.2,1);
     }
     .tab-btn:hover { color: var(--brand-deep); }
-    .tab-btn.active { color: var(--brand); border-bottom-color: var(--brand); }
+    .tab-btn:hover::before { opacity: 1; transform: scale(1); }
+    .tab-btn:active::before { background: var(--line); }
+    .tab-btn.active { color: var(--brand); }
+    .tab-btn.active:hover::before { opacity: 0; }
+    .tab-btn:focus-visible { outline-offset: -2px; }
 
-    .tab-content { display: none; padding: 10px 12px; max-height: 600px; overflow-y: auto; }
-    .tab-content.active { display: block; }
+    /* Плавающий индикатор — скользит и меняет ширину под активную вкладку */
+    .tabs__indicator {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      height: 2.5px;
+      width: 0;
+      border-radius: 2px 2px 0 0;
+      background: var(--brand);
+      transform: translateX(0);
+      transition: transform .32s cubic-bezier(.65,0,.35,1), width .32s cubic-bezier(.65,0,.35,1);
+      pointer-events: none;
+    }
+
+    .tab-content {
+      display: none;
+      padding: 10px 12px;
+      max-height: 600px;
+      overflow-y: auto;
+    }
+    .tab-content.active {
+      display: block;
+      animation: tab-fade-in .18s cubic-bezier(.4,0,.2,1);
+    }
+    @keyframes tab-fade-in {
+      from { opacity: 0; transform: translateY(3px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ---------- Заглушка для вкладок в разработке ---------- */
+    .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      gap: 10px;
+      padding: 54px 24px 60px;
+      color: var(--ink-faint);
+    }
+    .empty-state__icon {
+      width: 46px; height: 46px;
+      border-radius: 14px;
+      background: var(--brand-soft);
+      color: var(--brand);
+      display: flex; align-items: center; justify-content: center;
+      margin-bottom: 4px;
+    }
+    .empty-state__title {
+      font-size: 14px; font-weight: 800; color: var(--ink-soft);
+    }
+    .empty-state__desc {
+      font-size: 12px; line-height: 1.5; max-width: 320px;
+    }
+    .empty-state__badge {
+      margin-top: 6px;
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 4px 11px;
+      border-radius: 999px;
+      background: var(--warn-soft); color: var(--warn);
+      font-size: 11px; font-weight: 700;
+    }
 
     /* ---------- Панели ---------- */
     .panel {
@@ -169,7 +252,7 @@
     /* ---------- Числовые поля ---------- */
     input[type="number"]::-webkit-outer-spin-button,
     input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-    input[type="number"] { -moz-appearance: textfield; }
+    input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
 
     input[type="number"], input[type="text"], input[type="date"] {
       font-family: var(--font-mono);
@@ -321,9 +404,13 @@
 </head>
 <body>
 
-  <div class="tabs">
+  <div class="tabs" id="tabs">
     <button class="tab-btn active" data-tab="tab-incasso">Инкассация</button>
     <button class="tab-btn" data-tab="tab-infolist">Инфолисты</button>
+    <button class="tab-btn" data-tab="tab-priemka">Приёмка</button>
+    <button class="tab-btn" data-tab="tab-inventory">Инвентаризация</button>
+    <button class="tab-btn" data-tab="tab-ai">ИИ Регламент</button>
+    <div class="tabs__indicator" id="tabsIndicator"></div>
   </div>
 
   <!-- Вкладка 1: КАЛЬКУЛЯТОР -->
@@ -456,6 +543,42 @@
         <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path></svg>
         Напечатать
       </button>
+    </div>
+  </div>
+
+  <!-- Вкладка 3: ПРИЁМКА -->
+  <div id="tab-priemka" class="tab-content">
+    <div class="empty-state">
+      <div class="empty-state__icon">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16V8z"/><path d="M3.27 6.96L12 12l8.73-5.04M12 22.08V12"/></svg>
+      </div>
+      <div class="empty-state__title">Приёмка</div>
+      <div class="empty-state__desc">Умное распределение товаров по ячейкам ПВЗ появится здесь: эвристика размеров, группировка по клиенту и приоритет видимости.</div>
+      <span class="empty-state__badge">В разработке</span>
+    </div>
+  </div>
+
+  <!-- Вкладка 4: ИНВЕНТАРИЗАЦИЯ -->
+  <div id="tab-inventory" class="tab-content">
+    <div class="empty-state">
+      <div class="empty-state__icon">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+      </div>
+      <div class="empty-state__title">Инвентаризация</div>
+      <div class="empty-state__desc">Проверка статуса каждой ячейки и заказа на ПВЗ — сверка «на бумаге» с фактическим наполнением полок.</div>
+      <span class="empty-state__badge">В разработке</span>
+    </div>
+  </div>
+
+  <!-- Вкладка 5: ИИ РЕГЛАМЕНТ -->
+  <div id="tab-ai" class="tab-content">
+    <div class="empty-state">
+      <div class="empty-state__icon">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a4 4 0 014 4v1a4 4 0 01-8 0V6a4 4 0 014-4z"/><path d="M8 11v1a4 4 0 004 4 4 4 0 004-4v-1M12 16v6M9 22h6"/></svg>
+      </div>
+      <div class="empty-state__title">ИИ Регламент</div>
+      <div class="empty-state__desc">База правил и опыта сотрудников ПВЗ, оформленная как справочник для быстрых подсказок прямо во время работы.</div>
+      <span class="empty-state__badge">В разработке</span>
     </div>
   </div>
 

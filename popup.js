@@ -38,13 +38,46 @@ function clampNonNegative(inputElement) {
 // ==========================================
 // 1. ВКЛАДКИ
 // ==========================================
-document.querySelectorAll('.tab-btn').forEach(btn => {
+const tabsBar = document.getElementById('tabs');
+const tabsIndicator = document.getElementById('tabsIndicator');
+const tabBtns = document.querySelectorAll('.tab-btn');
+
+function moveIndicatorTo(btn, animate = true) {
+  if (!btn || !tabsIndicator) return;
+  tabsIndicator.style.transition = animate
+    ? 'transform .32s cubic-bezier(.65,0,.35,1), width .32s cubic-bezier(.65,0,.35,1)'
+    : 'none';
+  tabsIndicator.style.width = `${btn.offsetWidth}px`;
+  tabsIndicator.style.transform = `translateX(${btn.offsetLeft}px)`;
+}
+
+tabBtns.forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('.tab-btn, .tab-content').forEach(el => el.classList.remove('active'));
     btn.classList.add('active');
     document.getElementById(btn.dataset.tab).classList.add('active');
+    moveIndicatorTo(btn, true);
+    // Если вкладка выходит за видимую область — плавно докручиваем к ней
+    btn.scrollIntoView({ behavior: 'smooth', inline: 'nearest', block: 'nearest' });
   });
 });
+
+// Ставим индикатор под активную вкладку сразу при открытии попапа
+// (без анимации — иначе он "приедет" из левого угла при каждом открытии)
+function initTabIndicator() {
+  const activeBtn = document.querySelector('.tab-btn.active');
+  moveIndicatorTo(activeBtn, false);
+}
+// Скрипт подключён в конце body, поэтому DOM уже готов — считаем сразу,
+// а 'load' держим как подстраховку (иконки/шрифты могут чуть сдвинуть layout).
+initTabIndicator();
+window.addEventListener('load', initTabIndicator);
+// Шрифт Manrope грузится асинхронно — после его подгрузки ширины кнопок
+// могут чуть измениться, поэтому пересчитываем индикатор без анимации.
+if (document.fonts && document.fonts.ready) {
+  document.fonts.ready.then(() => moveIndicatorTo(document.querySelector('.tab-btn.active'), false));
+}
+window.addEventListener('resize', () => moveIndicatorTo(document.querySelector('.tab-btn.active'), false));
 
 // ==========================================
 // 2. КАЛЬКУЛЯТОР ИНКАССАЦИИ
@@ -60,13 +93,25 @@ const formatSum = (num) => num.toLocaleString('ru-RU').replace(/,/g, ' ');
 
 // Последний рассчитанный набор количеств купюр по номиналам — нужен, чтобы
 // сохранять его вместе с номером сумки, даже если менялось только это поле.
+// currentCounts — это ВСЕ купюры "по факту" (инкассация + то, что остаётся
+// как сдача/резерв в кассе). currentEncashCounts — только та часть, которая
+// реально идёт на инкассацию (та же логика, что и колонка "Инкассация" в
+// таблице). Расширение на dp.uzum.uz должно подставлять в форму WMS именно
+// currentEncashCounts, а не currentCounts — иначе туда попадали бы и деньги,
+// которые остаются на сдачу.
 let currentCounts = {};
+let currentEncashCounts = {};
 
 // Единая точка сохранения состояния калькулятора в chrome.storage.local.
 // Используется и калькулятором, и импортом — чтобы не было двух версий
 // одной и той же логики сохранения.
-const persistCalculatorState = debounce((counts, wmsValue, bagNumber) => {
-  chrome.storage.local.set({ savedCounts: counts, savedWms: wmsValue, savedBagNumber: bagNumber }, () => {
+const persistCalculatorState = debounce((counts, encashCounts, wmsValue, bagNumber) => {
+  chrome.storage.local.set({
+    savedCounts: counts,
+    savedEncashCounts: encashCounts,
+    savedWms: wmsValue,
+    savedBagNumber: bagNumber
+  }, () => {
     if (chrome.runtime.lastError) {
       console.error('Ошибка сохранения состояния:', chrome.runtime.lastError.message);
     }
@@ -91,7 +136,7 @@ function attachBagNumberBehaviors(inputElement) {
   inputElement.addEventListener('focus', (e) => e.target.select());
   inputElement.addEventListener('input', (e) => {
     clampNonNegative(e.target);
-    persistCalculatorState(currentCounts, wmsInput.value, bagNumberInput.value);
+    persistCalculatorState(currentCounts, currentEncashCounts, wmsInput.value, bagNumberInput.value);
   });
 }
 
@@ -145,6 +190,7 @@ function calculateTotals() {
 
   const targetEncashment = totalFact - MIN_CASH_RESERVE;
   let currentEncashmentSum = 0, totalEncashment = 0, totalChange = 0;
+  const encashCounts = {};
 
   DENOMINATIONS.forEach(denom => {
     const count = Number(counts[denom]) || 0;
@@ -157,6 +203,7 @@ function calculateTotals() {
     currentEncashmentSum += (encashCount * denom);
     totalEncashment += (encashCount * denom);
     totalChange += (changeCount * denom);
+    encashCounts[denom] = encashCount;
 
     document.getElementById(`encash-${denom}`).textContent = encashCount;
     document.getElementById(`change-${denom}`).textContent = changeCount;
@@ -195,7 +242,8 @@ function calculateTotals() {
   document.getElementById('control').dataset.state = controlState;
 
   currentCounts = counts;
-  persistCalculatorState(counts, wmsInput.value, bagNumberInput.value);
+  currentEncashCounts = encashCounts;
+  persistCalculatorState(counts, encashCounts, wmsInput.value, bagNumberInput.value);
 }
 
 // ==========================================
