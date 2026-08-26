@@ -35,16 +35,89 @@ function clampNonNegative(inputElement) {
   }
 }
 
+// ---------- Денежное поле с разделителями тысяч "вживую" ----------
+// type="number" физически не может показывать "1 910 709" — браузер обязан
+// хранить в нём чистое число без пробелов. Поэтому для "Сумма в WMS" (может
+// доходить до 7-8 значащих цифр) используем type="text" с ручным
+// форматированием при вводе: пользователь видит и печатает как обычно, а
+// внутри всегда остаётся чистая цифровая строка для расчётов/сохранения.
+function rawDigits(str) {
+  return (str || '').replace(/\D/g, '');
+}
+
+function formatDigitsForDisplay(digits) {
+  if (!digits) return '';
+  return Number(digits).toLocaleString('ru-RU').replace(/,/g, ' ');
+}
+
+// Читает денежное поле как чистое число, независимо от того, отформатировано
+// оно пробелами или нет.
+function getMoneyInputValue(inputEl) {
+  return Number(rawDigits(inputEl.value)) || 0;
+}
+
+// Программно проставляет значение денежного поля с готовым форматированием
+// (используется при автоподстановке из кассы, восстановлении сохранённого
+// состояния и импорте — везде, где значение приходит не от живого ввода).
+function setMoneyInputValue(inputEl, rawValue) {
+  inputEl.value = formatDigitsForDisplay(rawDigits(String(rawValue ?? '')));
+}
+
+// Обработчик события 'input' — переформатирует по мере набора, сохраняя
+// позицию курсора ОТНОСИТЕЛЬНО КОНЦА строки, а не начала: иначе при вводе
+// в середину уже введённого числа курсор "прыгал" бы каждый раз, когда
+// добавляется или пропадает разделяющий пробел.
+function formatMoneyInputLive(inputEl) {
+  const digits = rawDigits(inputEl.value);
+  const distanceFromEnd = inputEl.value.length - inputEl.selectionStart;
+  inputEl.value = formatDigitsForDisplay(digits);
+  const newPos = Math.max(0, inputEl.value.length - distanceFromEnd);
+  inputEl.setSelectionRange(newPos, newPos);
+}
+
 // ==========================================
 // 1. ВКЛАДКИ
 // ==========================================
-document.querySelectorAll('.tab-btn').forEach(btn => {
+const tabsBar = document.getElementById('tabs');
+const tabsIndicator = document.getElementById('tabsIndicator');
+const tabBtns = document.querySelectorAll('.tab-btn');
+
+function moveIndicatorTo(btn, animate = true) {
+  if (!btn || !tabsIndicator) return;
+  tabsIndicator.style.transition = animate
+    ? 'transform .32s cubic-bezier(.65,0,.35,1), width .32s cubic-bezier(.65,0,.35,1)'
+    : 'none';
+  tabsIndicator.style.width = `${btn.offsetWidth}px`;
+  tabsIndicator.style.transform = `translateX(${btn.offsetLeft}px)`;
+}
+
+tabBtns.forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('.tab-btn, .tab-content').forEach(el => el.classList.remove('active'));
     btn.classList.add('active');
     document.getElementById(btn.dataset.tab).classList.add('active');
+    moveIndicatorTo(btn, true);
+    // Если вкладка выходит за видимую область — плавно докручиваем к ней
+    btn.scrollIntoView({ behavior: 'smooth', inline: 'nearest', block: 'nearest' });
   });
 });
+
+// Ставим индикатор под активную вкладку сразу при открытии попапа
+// (без анимации — иначе он "приедет" из левого угла при каждом открытии)
+function initTabIndicator() {
+  const activeBtn = document.querySelector('.tab-btn.active');
+  moveIndicatorTo(activeBtn, false);
+}
+// Скрипт подключён в конце body, поэтому DOM уже готов — считаем сразу,
+// а 'load' держим как подстраховку (иконки/шрифты могут чуть сдвинуть layout).
+initTabIndicator();
+window.addEventListener('load', initTabIndicator);
+// Шрифт Manrope грузится асинхронно — после его подгрузки ширины кнопок
+// могут чуть измениться, поэтому пересчитываем индикатор без анимации.
+if (document.fonts && document.fonts.ready) {
+  document.fonts.ready.then(() => moveIndicatorTo(document.querySelector('.tab-btn.active'), false));
+}
+window.addEventListener('resize', () => moveIndicatorTo(document.querySelector('.tab-btn.active'), false));
 
 // ==========================================
 // 2. КАЛЬКУЛЯТОР ИНКАССАЦИИ
@@ -60,13 +133,25 @@ const formatSum = (num) => num.toLocaleString('ru-RU').replace(/,/g, ' ');
 
 // Последний рассчитанный набор количеств купюр по номиналам — нужен, чтобы
 // сохранять его вместе с номером сумки, даже если менялось только это поле.
+// currentCounts — это ВСЕ купюры "по факту" (инкассация + то, что остаётся
+// как сдача/резерв в кассе). currentEncashCounts — только та часть, которая
+// реально идёт на инкассацию (та же логика, что и колонка "Инкассация" в
+// таблице). Расширение на dp.uzum.uz должно подставлять в форму WMS именно
+// currentEncashCounts, а не currentCounts — иначе туда попадали бы и деньги,
+// которые остаются на сдачу.
 let currentCounts = {};
+let currentEncashCounts = {};
 
 // Единая точка сохранения состояния калькулятора в chrome.storage.local.
 // Используется и калькулятором, и импортом — чтобы не было двух версий
 // одной и той же логики сохранения.
-const persistCalculatorState = debounce((counts, wmsValue, bagNumber) => {
-  chrome.storage.local.set({ savedCounts: counts, savedWms: wmsValue, savedBagNumber: bagNumber }, () => {
+const persistCalculatorState = debounce((counts, encashCounts, wmsValue, bagNumber) => {
+  chrome.storage.local.set({
+    savedCounts: counts,
+    savedEncashCounts: encashCounts,
+    savedWms: wmsValue,
+    savedBagNumber: bagNumber
+  }, () => {
     if (chrome.runtime.lastError) {
       console.error('Ошибка сохранения состояния:', chrome.runtime.lastError.message);
     }
@@ -84,6 +169,17 @@ function attachInputBehaviors(inputElement) {
   });
 }
 
+function attachMoneyInputBehaviors(inputElement) {
+  inputElement.addEventListener('focus', (e) => e.target.select());
+  inputElement.addEventListener('input', (e) => formatMoneyInputLive(e.target));
+  inputElement.addEventListener('blur', (e) => {
+    if (rawDigits(e.target.value) === '') {
+      e.target.value = '0';
+      calculateTotals();
+    }
+  });
+}
+
 // Номер сумки — НЕ денежное поле: пустое значение не должно превращаться в "0"
 // на blur (0 выглядел бы как реальный номер сумки), и его изменение не должно
 // пересчитывать вердикт/контроль кассы — это про другое поле.
@@ -91,7 +187,7 @@ function attachBagNumberBehaviors(inputElement) {
   inputElement.addEventListener('focus', (e) => e.target.select());
   inputElement.addEventListener('input', (e) => {
     clampNonNegative(e.target);
-    persistCalculatorState(currentCounts, wmsInput.value, bagNumberInput.value);
+    persistCalculatorState(currentCounts, currentEncashCounts, getMoneyInputValue(wmsInput), bagNumberInput.value);
   });
 }
 
@@ -123,7 +219,7 @@ DENOMINATIONS.forEach(denom => {
   container.appendChild(row);
   attachInputBehaviors(row.querySelector('.fact-input'));
 });
-attachInputBehaviors(wmsInput);
+attachMoneyInputBehaviors(wmsInput);
 attachBagNumberBehaviors(bagNumberInput);
 
 const navigableInputs = [...document.querySelectorAll('.fact-input'), wmsInput, bagNumberInput];
@@ -133,7 +229,7 @@ container.addEventListener('input', calculateTotals);
 wmsInput.addEventListener('input', calculateTotals);
 
 function calculateTotals() {
-  const wmsTotal = Math.max(0, Number(wmsInput.value) || 0);
+  const wmsTotal = getMoneyInputValue(wmsInput);
   let totalFact = 0, counts = {};
 
   document.querySelectorAll('.fact-input').forEach(input => {
@@ -145,6 +241,7 @@ function calculateTotals() {
 
   const targetEncashment = totalFact - MIN_CASH_RESERVE;
   let currentEncashmentSum = 0, totalEncashment = 0, totalChange = 0;
+  const encashCounts = {};
 
   DENOMINATIONS.forEach(denom => {
     const count = Number(counts[denom]) || 0;
@@ -157,6 +254,7 @@ function calculateTotals() {
     currentEncashmentSum += (encashCount * denom);
     totalEncashment += (encashCount * denom);
     totalChange += (changeCount * denom);
+    encashCounts[denom] = encashCount;
 
     document.getElementById(`encash-${denom}`).textContent = encashCount;
     document.getElementById(`change-${denom}`).textContent = changeCount;
@@ -165,7 +263,7 @@ function calculateTotals() {
   const diff = totalFact - wmsTotal;
   let verdict = diff > DISCREPANCY_TOLERANCE
     ? "⚠️ Излишек"
-    : (diff < -DISCREPANCY_TOLERANCE ? "❌ Недосдача" : (diff !== 0 ? "☑️ Незначительное расхождение" : "✅ Всё сошлось"));
+    : (diff < -DISCREPANCY_TOLERANCE ? "❌ Недосдача" : (diff !== 0 ? "🟡 Незначительное расхождение" : "✅ Всё сошлось"));
   // Состояние для цвета чипа — считается из тех же условий, что и текст выше,
   // ничего в самой логике вердикта не меняет.
   let verdictState = diff > DISCREPANCY_TOLERANCE
@@ -181,7 +279,7 @@ function calculateTotals() {
     control = "❌ ОШИБКА в кассе!";
     controlState = "bad";
   } else if (targetEncashment !== totalEncashment) {
-    control = "☑️ Незначительное расхождение";
+    control = "🟡 Незначительное расхождение";
     controlState = "warn";
   }
 
@@ -189,13 +287,15 @@ function calculateTotals() {
   document.getElementById('total-encash').textContent = formatSum(totalEncashment);
   document.getElementById('total-change').textContent = formatSum(totalChange);
   document.getElementById('diff').textContent = formatSum(diff);
+  document.getElementById('diff').dataset.state = verdictState;
   document.getElementById('verdict').textContent = verdict;
   document.getElementById('verdict').dataset.state = verdictState;
   document.getElementById('control').textContent = control;
   document.getElementById('control').dataset.state = controlState;
 
   currentCounts = counts;
-  persistCalculatorState(counts, wmsInput.value, bagNumberInput.value);
+  currentEncashCounts = encashCounts;
+  persistCalculatorState(counts, encashCounts, getMoneyInputValue(wmsInput), bagNumberInput.value);
 }
 
 // ==========================================
@@ -445,7 +545,7 @@ function buildExportPayload() {
     version: EXPORT_VERSION,
     exportedAt: new Date().toISOString(),
     bagNumber: bagNumberInput.value || '',
-    wmsTotal: wmsInput.value || '0',
+    wmsTotal: String(getMoneyInputValue(wmsInput)),
     counts
   };
 }
@@ -503,8 +603,7 @@ document.getElementById('btn-import').addEventListener('click', () => {
   });
 
   if (payload.wmsTotal !== undefined) {
-    wmsInput.value = payload.wmsTotal;
-    clampNonNegative(wmsInput);
+    setMoneyInputValue(wmsInput, payload.wmsTotal);
   }
   if (payload.bagNumber !== undefined) {
     bagNumberInput.value = payload.bagNumber;
@@ -517,21 +616,69 @@ document.getElementById('btn-import').addEventListener('click', () => {
   showTransferStatus(importStatus, '✅ Импортировано и сохранено', false);
 });
 
+// Показывает, откуда взялось значение "Сумма в WMS" и насколько оно свежее —
+// чтобы автоматическая подстановка не выглядела как чёрный ящик и оператор
+// мог сам решить, доверять ли ей (поле остаётся редактируемым в любом случае).
+function formatSyncTime(timestamp) {
+  if (!timestamp) return '';
+  return new Date(timestamp).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+}
+
+function showWmsSyncHint(timestamp, cashInRegister, pendingEncashment) {
+  const hint = document.getElementById('wms-sync-hint');
+  if (!hint || !timestamp) return;
+
+  const STALE_AFTER_MS = 12 * 60 * 60 * 1000; // старше 12 часов — вероятно, другая смена
+  const isStale = (Date.now() - timestamp) > STALE_AFTER_MS;
+  const timeStr = formatSyncTime(timestamp);
+
+  // Подсказка теперь живёт ВНУТРИ карточки, прямо под полем "Сумма в WMS" —
+  // источник значения и так очевиден из контекста, поэтому не повторяем его
+  // словами и оставляем только время и (если есть) саму разбивку вычитания.
+  // Показываем её только когда реально есть что вычитать — иначе в обычном
+  // случае (ничего не ждёт инкассации) это была бы бесполезная "− 0".
+  const hasBreakdown = cashInRegister !== undefined && pendingEncashment > 0;
+  const breakdown = hasBreakdown
+    ? ` · <span class="hint-figure">${formatSum(cashInRegister)}</span> − <span class="hint-figure">${formatSum(pendingEncashment)}</span> к инкассации`
+    : '';
+
+  hint.innerHTML = isStale
+    ? `⚠️ Данные из кассы устарели (${timeStr}) — проверьте актуальность`
+    : `🔄 Обновлено в ${timeStr}${breakdown}`;
+  hint.style.color = isStale ? 'var(--bad)' : 'var(--good)';
+  hint.style.display = 'block';
+}
+
 // ==========================================
 // 5. ЗАГРУЗКА СОСТОЯНИЯ ПРИ СТАРТЕ
 // ==========================================
 document.addEventListener('DOMContentLoaded', () => {
-  chrome.storage.local.get(['savedCounts', 'savedWms', 'savedSender', 'savedBagNumber'], (data) => {
-    if (data.savedCounts) {
-      document.querySelectorAll('.fact-input').forEach(input => {
-        const denom = input.dataset.denom;
-        if (data.savedCounts[denom] !== undefined) input.value = data.savedCounts[denom];
-      });
-    }
-    if (data.savedWms !== undefined) wmsInput.value = data.savedWms;
-    if (data.savedBagNumber !== undefined) bagNumberInput.value = data.savedBagNumber;
-    calculateTotals();
+  chrome.storage.local.get(
+    ['savedCounts', 'savedWms', 'savedSender', 'savedBagNumber', 'wmsBalanceFromDom', 'wmsBalanceFromDomAt', 'wmsCashInRegister', 'wmsPendingEncashment'],
+    (data) => {
+      if (data.savedCounts) {
+        document.querySelectorAll('.fact-input').forEach(input => {
+          const denom = input.dataset.denom;
+          if (data.savedCounts[denom] !== undefined) input.value = data.savedCounts[denom];
+        });
+      }
 
-    if (data.savedSender) document.getElementById('input-sender').value = data.savedSender;
-  });
+      // Значение, автоматически прочитанное со страницы кассы, приоритетнее
+      // ранее вручную сохранённого — оно свежее и снимает необходимость
+      // переписывать число из интерфейса WMS руками. Поле остаётся обычным
+      // редактируемым input — если оно неверное или устарело, оператор может
+      // просто исправить его, как и раньше.
+      if (data.wmsBalanceFromDom !== undefined) {
+        setMoneyInputValue(wmsInput, data.wmsBalanceFromDom);
+        showWmsSyncHint(data.wmsBalanceFromDomAt, data.wmsCashInRegister, data.wmsPendingEncashment);
+      } else if (data.savedWms !== undefined) {
+        setMoneyInputValue(wmsInput, data.savedWms);
+      }
+
+      if (data.savedBagNumber !== undefined) bagNumberInput.value = data.savedBagNumber;
+      calculateTotals();
+
+      if (data.savedSender) document.getElementById('input-sender').value = data.savedSender;
+    }
+  );
 });

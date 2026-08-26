@@ -48,17 +48,26 @@
     input.dispatchEvent(new Event('blur'));
   }
 
-  // Кратковременная зелёная обводка — визуальное подтверждение, что поле заполнено.
+  // Визуальное подтверждение, что поле заполнено: мягкая зелёная заливка,
+  // которая плавно "растворяется" обратно в исходный фон поля — вместо
+  // прежней жёсткой зелёной рамки-квадрата, которая смотрелась грубо.
   function flashSuccess(input) {
     if (!input) return;
-    const prevOutline = input.style.outline;
+    const prevBg = input.style.backgroundColor;
     const prevTransition = input.style.transition;
-    input.style.transition = 'outline-color 0.2s ease';
-    input.style.outline = '2px solid #2e7d32';
+
+    // Ставим стартовый цвет без анимации, форсируем reflow, чтобы браузер
+    // "зафиксировал" зелёный как отправную точку, а затем включаем плавный
+    // переход обратно к исходному фону.
+    input.style.transition = 'none';
+    input.style.backgroundColor = 'rgba(46, 125, 50, 0.38)';
+    void input.offsetWidth;
+    input.style.transition = 'background-color 1.1s ease';
+    input.style.backgroundColor = prevBg;
+
     setTimeout(() => {
-      input.style.outline = prevOutline;
       input.style.transition = prevTransition;
-    }, 900);
+    }, 1150);
   }
 
   // Поле "Номер сумки" не имеет собственного id/data-test-id — все четыре
@@ -152,16 +161,23 @@
     }
 
     try {
-      chrome.storage.local.get(['savedCounts', 'savedBagNumber'], (data) => {
+      // savedCounts — это ВСЕ купюры "по факту" (инкассация + сдача, которая
+      // остаётся в кассе). Для формы WMS нужны только купюры на инкассацию,
+      // поэтому читаем отдельно сохранённый набор savedEncashCounts (считается
+      // в popup.js по той же логике, что и колонка "Инкассация" в калькуляторе).
+      // savedCounts при этом всё ещё нужен — по нему определяем, пользовался
+      // ли человек калькулятором вообще (см. hasSavedData ниже).
+      chrome.storage.local.get(['savedCounts', 'savedEncashCounts', 'savedBagNumber'], (data) => {
         if (chrome.runtime.lastError) {
           console.error(`${LOG_PREFIX} ошибка чтения хранилища —`, chrome.runtime.lastError.message);
           alert('❌ Не удалось прочитать сохранённые данные из расширения.');
           return;
         }
 
-        const counts = data.savedCounts || {};
+        const factCounts = data.savedCounts || {};
+        const encashCounts = data.savedEncashCounts || {};
         const bagNumber = data.savedBagNumber;
-        console.log(`${LOG_PREFIX} читаю данные из хранилища:`, { bagNumber, counts });
+        console.log(`${LOG_PREFIX} читаю данные из хранилища:`, { bagNumber, factCounts, encashCounts });
 
         const bagInput = findBagNumberInput(formCash);
         if (bagInput) {
@@ -179,7 +195,7 @@
         let filledCount = 0;
         DENOMINATIONS.forEach((denom) => {
           const input = denomMap[denom];
-          const count = counts[denom];
+          const count = encashCounts[denom];
           if (!input) {
             console.warn(`${LOG_PREFIX} не найдено поле для номинала ${denom} на странице — пропускаю.`);
             return;
@@ -191,10 +207,15 @@
           }
         });
 
-        console.log(`${LOG_PREFIX} заполнено полей номиналов:`, filledCount);
+        console.log(`${LOG_PREFIX} заполнено полей номиналов (только инкассация, без сдачи):`, filledCount);
 
+        // "Есть ли вообще что подставлять" проверяем по ФАКТИЧЕСКИМ купюрам
+        // (не по encashCounts) — иначе если весь факт ушёл в "Сдачу" (остаток
+        // кассы не превысил минимальный резерв), пользователю ошибочно
+        // покажет предупреждение "нет сохранённых данных", хотя калькулятор
+        // на самом деле заполнен, просто инкассировать сейчас нечего.
         const hasSavedData = (bagNumber !== undefined && bagNumber !== '')
-          || Object.keys(counts).some(k => counts[k] !== undefined && counts[k] !== '' && counts[k] !== '0');
+          || Object.keys(factCounts).some(k => factCounts[k] !== undefined && factCounts[k] !== '' && factCounts[k] !== '0');
 
         if (!hasSavedData) {
           alert('⚠️ В расширении нет сохранённых данных калькулятора. Заполните вкладку "Инкассация" сначала (или импортируйте данные с другого компьютера).');
@@ -213,26 +234,52 @@
     }
   }
 
+  const BTN_GRADIENT = 'linear-gradient(135deg, #7000ff, #9b4dff)';
+  const BTN_GRADIENT_HOVER = 'linear-gradient(135deg, #5a00cc, #7f33e6)';
+
   function createFillButton() {
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.textContent = 'Заполнить (ПВЗ Помощник)';
     btn.setAttribute(INJECTED_ATTR, 'true');
+    // Пилюля с иконкой-молнией вместо плоского прямоугольника — заметнее
+    // как акцентная кнопка действия и не выглядит как элемент формы WMS.
+    btn.innerHTML = [
+      '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0">',
+      '<path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z"/>',
+      '</svg>',
+      '<span>Заполнить (U-Core)</span>'
+    ].join('');
     btn.style.cssText = [
       'margin-left: auto',
-      'background: #7000ff',
+      'display: inline-flex',
+      'align-items: center',
+      'gap: 6px',
+      `background: ${BTN_GRADIENT}`,
       'color: #ffffff',
       'border: none',
-      'border-radius: 6px',
-      'padding: 6px 14px',
+      'border-radius: 999px',
+      'padding: 7px 16px',
       'font-family: Inter, Arial, sans-serif',
       'font-weight: 600',
       'font-size: 12px',
+      'line-height: 1',
       'cursor: pointer',
-      'white-space: nowrap'
+      'white-space: nowrap',
+      'box-shadow: 0 3px 10px -3px rgba(112, 0, 255, 0.55)',
+      'transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease'
     ].join(';');
-    btn.addEventListener('mouseenter', () => { btn.style.background = '#5a00cc'; });
-    btn.addEventListener('mouseleave', () => { btn.style.background = '#7000ff'; });
+    btn.addEventListener('mouseenter', () => {
+      btn.style.background = BTN_GRADIENT_HOVER;
+      btn.style.boxShadow = '0 5px 14px -3px rgba(112, 0, 255, 0.65)';
+      btn.style.transform = 'translateY(-1px)';
+    });
+    btn.addEventListener('mouseleave', () => {
+      btn.style.background = BTN_GRADIENT;
+      btn.style.boxShadow = '0 3px 10px -3px rgba(112, 0, 255, 0.55)';
+      btn.style.transform = 'translateY(0)';
+    });
+    btn.addEventListener('mousedown', () => { btn.style.transform = 'translateY(0) scale(0.97)'; });
+    btn.addEventListener('mouseup', () => { btn.style.transform = 'translateY(-1px) scale(1)'; });
     btn.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -254,6 +301,88 @@
     return null;
   }
 
+  // ---------- Автоматическое чтение "Сумма в WMS" ----------
+  // На главной странице "Касса" (когда смена уже открыта) сумма показана в
+  // виджете work-shift-balance под заголовком "В кассе наличных" — это и есть
+  // та величина, с которой оператор сверяет физический пересчёт купюр в
+  // калькуляторе расширения. Текст выглядит как "5 135 659 сум" (с &nbsp;
+  // или обычными пробелами как разделителями тысяч), поэтому парсим только
+  // цифры и отбрасываем всё остальное.
+  //
+  // ЭФФЕКТИВНЫЙ БАЛАНС (вычитаем "К инкассации"): "В кассе наличных" не
+  // уменьшается в момент, когда кассир физически отдал деньги инкассатору —
+  // WMS списывает эту сумму только по нажатию "Инкассировать" и подтверждению.
+  // Пока это не сделано, физически в кассе уже меньше денег, чем показывает
+  // "В кассе наличных", ровно на "К инкассации" (виджет .work-shift-blocked-balance).
+  // Поэтому:
+  //
+  //     эффективный баланс = "В кассе наличных" − "К инкассации"
+  //
+  // Читаем оба числа заново при КАЖДОЙ синхронизации и ВСЕГДА вычитаем — по
+  // подтверждению от пользователя, WMS обновляет "К инкассации" в DOM сразу
+  // же по нажатию (без задержки/рассинхрона), так что отдельно детектировать
+  // "инкассация подтверждена / ещё нет" не нужно: как только она подтверждена,
+  // "К инкассации" сам станет 0, и вычитание нуля ничего не испортит.
+  //
+  // Если виджета "К инкассации" нет в DOM вообще — считаем его равным 0
+  // (а не блокируем синхронизацию суммы кассы целиком). Это предположение:
+  // сейчас нет подтверждения, всегда ли этот виджет рендерится (в т.ч. с
+  // "0 сум") или пропадает из DOM, когда инкассировать нечего — если оно
+  // неверное, в консоли будет видно расхождение.
+  const WMS_BALANCE_STORAGE_KEY = 'wmsBalanceFromDom';
+  let lastSyncedWmsKey = null;
+
+  function parseWmsBalanceText(text) {
+    const digitsOnly = (text || '').replace(/\D/g, '');
+    if (!digitsOnly) return null;
+    const value = parseInt(digitsOnly, 10);
+    return Number.isFinite(value) ? value : null;
+  }
+
+  function readBalanceBySelector(selector) {
+    const el = document.querySelector(selector);
+    return el ? parseWmsBalanceText(el.textContent) : null;
+  }
+
+  function syncWmsBalanceFromDom() {
+    const cashValue = readBalanceBySelector('.work-shift-balance .balance');
+    if (cashValue === null) return; // смены нет / не на странице кассы — ничего не трогаем
+
+    const blockedValue = readBalanceBySelector('.work-shift-blocked-balance .balance') ?? 0;
+    const effective = Math.max(0, cashValue - blockedValue);
+
+    // Дедуп по ОБОИМ сырым числам, а не по итоговой разнице — иначе если
+    // касса и "к инкассации" одновременно изменятся на одну и ту же сумму
+    // (эффективный баланс совпадёт со старым), обновление молча потеряется.
+    const syncKey = `${cashValue}|${blockedValue}`;
+    if (syncKey === lastSyncedWmsKey) return;
+    lastSyncedWmsKey = syncKey;
+
+    try {
+      chrome.storage.local.set({
+        [WMS_BALANCE_STORAGE_KEY]: effective,
+        wmsCashInRegister: cashValue,
+        wmsPendingEncashment: blockedValue,
+        wmsBalanceFromDomAt: Date.now()
+      }, () => {
+        if (chrome.runtime.lastError) {
+          console.error(`${LOG_PREFIX} ошибка сохранения суммы из кассы —`, chrome.runtime.lastError.message);
+          return;
+        }
+        console.log(`${LOG_PREFIX} "Сумма в WMS" обновлена: касса ${cashValue} − к инкассации ${blockedValue} = ${effective}`);
+      });
+    } catch (err) {
+      if (isContextInvalidated(err)) {
+        // Расширение перезагрузили при открытой вкладке — молча пропускаем,
+        // это не критично (не мешает работе формы "Начать работу"), а
+        // навязчивый alert на каждое изменение баланса был бы избыточен.
+        console.warn(`${LOG_PREFIX} расширение обновлено — синхронизация суммы WMS приостановлена до обновления страницы.`);
+      } else {
+        console.error(`${LOG_PREFIX} неожиданная ошибка при синхронизации суммы WMS:`, err);
+      }
+    }
+  }
+
   function injectButtonIfNeeded() {
     // Проверяем, что на странице реально открыта форма "Начать работу",
     // а не какая-то другая side-панель.
@@ -261,20 +390,42 @@
 
     const row = findEmployeeRow();
     if (!row) return;
-    if (row.querySelector(`[${INJECTED_ATTR}]`)) return; // уже вставлено
 
-    row.style.display = 'flex';
-    row.style.alignItems = 'center';
-    row.appendChild(createFillButton());
+    // ЧИНИМ ЗДЕСЬ: раньше кнопка вставлялась ВНУТРЬ самого блока "Сотрудник"
+    // и переводила его в display:flex, из-за чего заголовок "Сотрудник" и имя
+    // сотрудника (например, "MURODOV M.") оказывались прижаты друг к другу в
+    // одну строку вместо родного вида (заголовок сверху, имя снизу), а кнопка
+    // висела прямо рядом с именем. Теперь блок "Сотрудник" не трогаем вообще —
+    // кнопку добавляем в его родительский контейнер (общую строку с другими
+    // инфо-блоками side-панели), последним элементом. За счёт margin-left:auto
+    // в стилях кнопки это ставит её в конец строки, не мешая соседним блокам.
+    const targetRow = row.parentElement || row;
+    if (targetRow.querySelector(`[${INJECTED_ATTR}]`)) return; // уже вставлено
+
+    const targetDisplay = window.getComputedStyle(targetRow).display;
+    if (!/flex/.test(targetDisplay)) {
+      // Подстраховка на случай, если родительский контейнер сам по себе не
+      // горизонтальный — тогда включаем flex именно на нём (а не на блоке
+      // "Сотрудник"), чтобы margin-left:auto кнопки сработал как задумано.
+      targetRow.style.display = 'flex';
+      targetRow.style.alignItems = 'center';
+    }
+
+    targetRow.appendChild(createFillButton());
     console.log(`${LOG_PREFIX} кнопка "Заполнить" добавлена в панель "Начать работу".`);
   }
 
   // Панель открывается динамически (без перезагрузки страницы),
   // поэтому следим за изменениями DOM.
-  const observer = new MutationObserver(() => injectButtonIfNeeded());
+  const observer = new MutationObserver(() => {
+    injectButtonIfNeeded();
+    syncWmsBalanceFromDom();
+  });
   observer.observe(document.body, { childList: true, subtree: true });
   console.log(`${LOG_PREFIX} наблюдатель за DOM запущен, жду появления панели "Начать работу".`);
 
-  // На случай, если content script загрузился уже при открытой панели.
+  // На случай, если content script загрузился уже при открытой панели
+  // или на уже открытой смене (главная страница "Касса").
   injectButtonIfNeeded();
+  syncWmsBalanceFromDom();
 })();
