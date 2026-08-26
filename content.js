@@ -301,6 +301,88 @@
     return null;
   }
 
+  // ---------- Автоматическое чтение "Сумма в WMS" ----------
+  // На главной странице "Касса" (когда смена уже открыта) сумма показана в
+  // виджете work-shift-balance под заголовком "В кассе наличных" — это и есть
+  // та величина, с которой оператор сверяет физический пересчёт купюр в
+  // калькуляторе расширения. Текст выглядит как "5 135 659 сум" (с &nbsp;
+  // или обычными пробелами как разделителями тысяч), поэтому парсим только
+  // цифры и отбрасываем всё остальное.
+  //
+  // ЭФФЕКТИВНЫЙ БАЛАНС (вычитаем "К инкассации"): "В кассе наличных" не
+  // уменьшается в момент, когда кассир физически отдал деньги инкассатору —
+  // WMS списывает эту сумму только по нажатию "Инкассировать" и подтверждению.
+  // Пока это не сделано, физически в кассе уже меньше денег, чем показывает
+  // "В кассе наличных", ровно на "К инкассации" (виджет .work-shift-blocked-balance).
+  // Поэтому:
+  //
+  //     эффективный баланс = "В кассе наличных" − "К инкассации"
+  //
+  // Читаем оба числа заново при КАЖДОЙ синхронизации и ВСЕГДА вычитаем — по
+  // подтверждению от пользователя, WMS обновляет "К инкассации" в DOM сразу
+  // же по нажатию (без задержки/рассинхрона), так что отдельно детектировать
+  // "инкассация подтверждена / ещё нет" не нужно: как только она подтверждена,
+  // "К инкассации" сам станет 0, и вычитание нуля ничего не испортит.
+  //
+  // Если виджета "К инкассации" нет в DOM вообще — считаем его равным 0
+  // (а не блокируем синхронизацию суммы кассы целиком). Это предположение:
+  // сейчас нет подтверждения, всегда ли этот виджет рендерится (в т.ч. с
+  // "0 сум") или пропадает из DOM, когда инкассировать нечего — если оно
+  // неверное, в консоли будет видно расхождение.
+  const WMS_BALANCE_STORAGE_KEY = 'wmsBalanceFromDom';
+  let lastSyncedWmsKey = null;
+
+  function parseWmsBalanceText(text) {
+    const digitsOnly = (text || '').replace(/\D/g, '');
+    if (!digitsOnly) return null;
+    const value = parseInt(digitsOnly, 10);
+    return Number.isFinite(value) ? value : null;
+  }
+
+  function readBalanceBySelector(selector) {
+    const el = document.querySelector(selector);
+    return el ? parseWmsBalanceText(el.textContent) : null;
+  }
+
+  function syncWmsBalanceFromDom() {
+    const cashValue = readBalanceBySelector('.work-shift-balance .balance');
+    if (cashValue === null) return; // смены нет / не на странице кассы — ничего не трогаем
+
+    const blockedValue = readBalanceBySelector('.work-shift-blocked-balance .balance') ?? 0;
+    const effective = Math.max(0, cashValue - blockedValue);
+
+    // Дедуп по ОБОИМ сырым числам, а не по итоговой разнице — иначе если
+    // касса и "к инкассации" одновременно изменятся на одну и ту же сумму
+    // (эффективный баланс совпадёт со старым), обновление молча потеряется.
+    const syncKey = `${cashValue}|${blockedValue}`;
+    if (syncKey === lastSyncedWmsKey) return;
+    lastSyncedWmsKey = syncKey;
+
+    try {
+      chrome.storage.local.set({
+        [WMS_BALANCE_STORAGE_KEY]: effective,
+        wmsCashInRegister: cashValue,
+        wmsPendingEncashment: blockedValue,
+        wmsBalanceFromDomAt: Date.now()
+      }, () => {
+        if (chrome.runtime.lastError) {
+          console.error(`${LOG_PREFIX} ошибка сохранения суммы из кассы —`, chrome.runtime.lastError.message);
+          return;
+        }
+        console.log(`${LOG_PREFIX} "Сумма в WMS" обновлена: касса ${cashValue} − к инкассации ${blockedValue} = ${effective}`);
+      });
+    } catch (err) {
+      if (isContextInvalidated(err)) {
+        // Расширение перезагрузили при открытой вкладке — молча пропускаем,
+        // это не критично (не мешает работе формы "Начать работу"), а
+        // навязчивый alert на каждое изменение баланса был бы избыточен.
+        console.warn(`${LOG_PREFIX} расширение обновлено — синхронизация суммы WMS приостановлена до обновления страницы.`);
+      } else {
+        console.error(`${LOG_PREFIX} неожиданная ошибка при синхронизации суммы WMS:`, err);
+      }
+    }
+  }
+
   function injectButtonIfNeeded() {
     // Проверяем, что на странице реально открыта форма "Начать работу",
     // а не какая-то другая side-панель.
@@ -335,10 +417,15 @@
 
   // Панель открывается динамически (без перезагрузки страницы),
   // поэтому следим за изменениями DOM.
-  const observer = new MutationObserver(() => injectButtonIfNeeded());
+  const observer = new MutationObserver(() => {
+    injectButtonIfNeeded();
+    syncWmsBalanceFromDom();
+  });
   observer.observe(document.body, { childList: true, subtree: true });
   console.log(`${LOG_PREFIX} наблюдатель за DOM запущен, жду появления панели "Начать работу".`);
 
-  // На случай, если content script загрузился уже при открытой панели.
+  // На случай, если content script загрузился уже при открытой панели
+  // или на уже открытой смене (главная страница "Касса").
   injectButtonIfNeeded();
+  syncWmsBalanceFromDom();
 })();

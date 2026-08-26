@@ -297,20 +297,8 @@
       background-repeat: repeat-x;
       background-color: var(--surface);
     }
-    .ledger__body {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 2px 20px;
-      padding: 4px 14px 12px;
-    }
-    .ledger__col { display: flex; flex-direction: column; gap: 3px; }
-    .ledger__row, .ledger__chip-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      min-height: 24px;
-    }
-    .ledger__label { font-size: 11.5px; color: var(--ink-soft); font-weight: 600; }
+
+    .ledger__label { font-size: 11.5px; color: var(--ink-soft); font-weight: 600; white-space: nowrap; }
     .ledger__value {
       font-family: var(--font-mono);
       font-weight: 700;
@@ -318,13 +306,26 @@
       font-variant-numeric: tabular-nums;
       color: var(--ink);
     }
-    .ledger__value--big { font-size: 15px; }
+    .ledger__value--big { font-size: 18px; }
+    .ledger__value[data-state="warn"] { color: var(--warn); }
+    .ledger__value[data-state="bad"]  { color: var(--bad); }
+
+    /* Зона 1 — поля ввода: сумма из кассы и номер сумки, бок о бок */
+    .ledger__inputs {
+      display: flex;
+      gap: 14px;
+      padding: 12px 16px;
+      border-bottom: 1px dashed var(--line);
+    }
+    .ledger__input-group { flex: 1; display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+    .ledger__input-group .ledger__input { width: 100%; text-align: left; }
+
     .ledger__input {
-      width: 104px;
-      text-align: right;
       background: var(--brand-soft);
-      padding: 5px 8px;
+      padding: 7px 9px;
       font-weight: 700;
+      font-family: var(--font-mono);
+      font-size: 13px;
     }
     .ledger__input:focus {
       background: var(--surface);
@@ -332,14 +333,66 @@
       box-shadow: 0 0 0 3px var(--brand-soft);
     }
     .ledger__input::placeholder { color: var(--ink-faint); font-weight: 500; }
-    .ledger__divider { border: none; border-top: 1px dashed var(--line); margin: 3px 0; height: 0; }
+
+    /* Зона 2 — разбивка по факту/инкассации/сдаче: простой ровный список,
+       без второй колонки — раньше именно неравное число строк слева/справа
+       (5 против 3) создавало пустой "хвост" под правой колонкой. */
+    .ledger__totals {
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+      padding: 11px 16px;
+      border-bottom: 1px dashed var(--line);
+    }
+    .ledger__total-row { display: flex; justify-content: space-between; align-items: baseline; }
+
+    /* Зона 3 — итог: "Разница" крупно сверху, вердикт/контроль как две
+       равные мини-карточки снизу — самая важная информация теперь весит
+       столько же, сколько должна, а не жмётся мелким текстом в колонке. */
+    .ledger__result { padding: 12px 16px 14px; }
+    .ledger__diff-row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px; }
+
+    .ledger__verdicts { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .ledger__verdict-card {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-s);
+      padding: 9px 11px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .ledger__verdict-label {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      font-weight: 700;
+      color: var(--ink-faint);
+    }
+
+    /* Подсказка синхронизации — теперь подвал самой карточки (единая рамка,
+       общее скругление снизу через overflow:hidden у .ledger), а не текст,
+       подвешенный отдельно под карточкой без всякой связи с ней. */
+    .ledger__sync-hint {
+      padding: 9px 16px 11px;
+      font-size: 11px;
+      font-weight: 600;
+      background: var(--line-soft);
+      border-top: 1px dashed var(--line);
+    }
+    .hint-figure {
+      font-family: var(--font-mono);
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
 
     .chip {
       display: inline-flex;
+      align-self: flex-start;
       align-items: center;
-      padding: 3px 10px;
+      padding: 4px 11px;
       border-radius: 999px;
-      font-size: 11px;
+      font-size: 12px;
       font-weight: 700;
       white-space: nowrap;
       background: var(--good-soft);
@@ -428,46 +481,51 @@
 
     <div class="ledger">
       <div class="ledger__perf" aria-hidden="true"></div>
-      <div class="ledger__body">
-        <div class="ledger__col">
-          <div class="ledger__row">
-            <span class="ledger__label">Сумма в WMS</span>
-            <input type="number" id="wms-total" value="0" class="ledger__input">
-          </div>
-          <div class="ledger__row">
-            <span class="ledger__label">Номер сумки</span>
-            <input type="number" id="bag-number" value="" placeholder="—" class="ledger__input">
-          </div>
-          <hr class="ledger__divider">
-          <div class="ledger__row">
-            <span class="ledger__label">Итог факт</span>
-            <span class="ledger__value ledger__value--big" id="total-fact">0</span>
-          </div>
-          <div class="ledger__row">
-            <span class="ledger__label">Инкассация</span>
-            <span class="ledger__value" id="total-encash">0</span>
-          </div>
-          <div class="ledger__row">
-            <span class="ledger__label">Сдача</span>
-            <span class="ledger__value" id="total-change">0</span>
-          </div>
+
+      <div class="ledger__inputs">
+        <div class="ledger__input-group">
+          <span class="ledger__label">Сумма в WMS</span>
+          <input type="text" inputmode="numeric" autocomplete="off" id="wms-total" value="0" class="ledger__input">
         </div>
-        <div class="ledger__col">
-          <div class="ledger__row">
-            <span class="ledger__label">Разница</span>
-            <span class="ledger__value" id="diff">0</span>
-          </div>
-          <hr class="ledger__divider">
-          <div class="ledger__chip-row">
-            <span class="ledger__label">Вердикт</span>
+        <div class="ledger__input-group">
+          <span class="ledger__label">Номер сумки</span>
+          <input type="number" id="bag-number" value="" placeholder="—" class="ledger__input">
+        </div>
+      </div>
+
+      <div class="ledger__totals">
+        <div class="ledger__total-row">
+          <span class="ledger__label">Итог факт</span>
+          <span class="ledger__value" id="total-fact">0</span>
+        </div>
+        <div class="ledger__total-row">
+          <span class="ledger__label">Инкассация</span>
+          <span class="ledger__value" id="total-encash">0</span>
+        </div>
+        <div class="ledger__total-row">
+          <span class="ledger__label">Сдача</span>
+          <span class="ledger__value" id="total-change">0</span>
+        </div>
+      </div>
+
+      <div class="ledger__result">
+        <div class="ledger__diff-row">
+          <span class="ledger__label">Разница</span>
+          <span class="ledger__value ledger__value--big" id="diff" data-state="ok">0</span>
+        </div>
+        <div class="ledger__verdicts">
+          <div class="ledger__verdict-card">
+            <span class="ledger__verdict-label">Вердикт</span>
             <span class="chip" id="verdict" data-state="ok">✅ Всё сошлось</span>
           </div>
-          <div class="ledger__chip-row">
-            <span class="ledger__label">Контроль</span>
+          <div class="ledger__verdict-card">
+            <span class="ledger__verdict-label">Контроль</span>
             <span class="chip" id="control" data-state="ok">✅ Всё сошлось</span>
           </div>
         </div>
       </div>
+
+      <div id="wms-sync-hint" class="ledger__sync-hint" style="display:none;"></div>
     </div>
 
     <div class="panel panel--quiet">
