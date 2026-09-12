@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Печать инфолиста</title>
+  <style>
+    :root {
+      --brand: #7000ff; --brand-deep: #5a00cc; --brand-soft: #f3ebff;
+      --ink: #14161a; --ink-soft: #4a5160; --ink-faint: #8b93a3;
+      --line: #e3e7ee; --surface: #fff;
+      --warn: #b45309; --warn-soft: #fff5e6;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: #eceff3; color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+      font-size: 14px;
+    }
+    .wrap { display: grid; grid-template-columns: 300px 1fr; min-height: 100vh; }
+    .side { background: var(--surface); border-right: 1px solid var(--line); padding: 18px 16px 40px; }
+    h1 { font-size: 17px; margin: 0 0 4px; }
+    .sub { font-size: 12px; color: var(--ink-faint); margin: 0 0 16px; line-height: 1.5; }
+
+    .facts { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-bottom: 14px; }
+    .facts__row { display: flex; justify-content: space-between; gap: 10px; padding: 3px 0; font-size: 12.5px; }
+    .facts__row b { text-align: right; }
+
+    .note {
+      display: none; margin-bottom: 12px; padding: 9px 11px; border-radius: 9px;
+      background: var(--warn-soft); color: var(--warn);
+      font-size: 12px; font-weight: 600; line-height: 1.45;
+    }
+
+    .btn-main {
+      width: 100%; background: var(--brand); border: 1px solid var(--brand); color: #fff;
+      border-radius: 9px; padding: 11px; font: inherit; font-weight: 700; font-size: 13.5px;
+      cursor: pointer;
+    }
+    .btn-main:hover { background: var(--brand-deep); }
+    .btn-main[disabled] { opacity: .45; cursor: default; }
+
+    .hint { margin-top: 12px; font-size: 11.5px; color: var(--ink-faint); line-height: 1.5; }
+
+    .preview { padding: 20px; overflow: auto; }
+    .preview__head { font-size: 12px; color: var(--ink-faint); margin-bottom: 10px; }
+    #sheets .il-sheet { margin: 0 auto 10mm; box-shadow: 0 2px 12px rgba(0,0,0,.15); }
+
+    @media print {
+      .side, .preview__head { display: none !important; }
+      .wrap { display: block; }
+      .preview { padding: 0; overflow: visible; }
+      body { background: #fff; }
+      #sheets .il-sheet { margin: 0; box-shadow: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <aside class="side">
+      <h1>Печать инфолиста</h1>
+      <p class="sub">Лист в натуральную величину: масштаб в окне печати менять не нужно — оставьте 100%.</p>
+
+      <div class="facts" id="facts"></div>
+      <div class="note" id="note"></div>
+
+      <button class="btn-main" id="print">Печатать</button>
+
+      <p class="hint">Если окно печати не открылось само — нажмите кнопку. В настройках печати
+        поля должны стоять «Нет», иначе Chrome допечатает по краям адрес и дату.</p>
+    </aside>
+
+    <main class="preview">
+      <div class="preview__head">Так лист ляжет на бумагу.</div>
+      <div id="sheets"></div>
+    </main>
+  </div>
+  <script src="infolist.js" type="module"></script>
+</body>
+</html>

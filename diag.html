@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Печать акта на диагностику</title>
+  <style>
+    :root {
+      --brand: #7000ff; --brand-deep: #5a00cc;
+      --ink: #14161a; --ink-soft: #4a5160; --ink-faint: #8b93a3;
+      --line: #e3e7ee; --surface: #fff;
+      --warn: #b45309; --warn-soft: #fff5e6; --bad: #c62828; --bad-soft: #fdeaea;
+      --good: #16794a; --good-soft: #e7f6ee;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: #eceff3; color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+      font-size: 14px;
+    }
+    .wrap { display: grid; grid-template-columns: 340px 1fr; min-height: 100vh; }
+    .side { background: var(--surface); border-right: 1px solid var(--line); padding: 18px 16px 40px; }
+    h1 { font-size: 17px; margin: 0 0 4px; }
+    .sub { font-size: 12px; color: var(--ink-faint); margin: 0 0 16px; line-height: 1.5; }
+
+    .facts { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-bottom: 14px; }
+    .facts__row { display: flex; justify-content: space-between; gap: 10px; padding: 3px 0; font-size: 12.5px; }
+    .facts__row b { text-align: right; }
+
+    .step { border: 1px solid var(--line); border-radius: 10px; padding: 12px; margin-bottom: 12px; }
+    .step[data-done="1"] { border-color: var(--good); background: var(--good-soft); }
+    .step__n { font-size: 10.5px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-faint); }
+    .step__t { font-size: 13.5px; font-weight: 700; margin: 2px 0 6px; }
+    .step__d { font-size: 12px; color: var(--ink-soft); line-height: 1.5; margin-bottom: 10px; }
+    .step__d b { color: var(--ink); }
+
+    button {
+      font: inherit; cursor: pointer; border-radius: 9px; border: 1px solid var(--line);
+      background: var(--surface); color: var(--ink); padding: 9px 12px; font-weight: 600;
+    }
+    button:hover { border-color: var(--brand); color: var(--brand); }
+    .btn-main {
+      width: 100%; background: var(--brand); border-color: var(--brand); color: #fff;
+      padding: 11px; font-weight: 700; font-size: 13.5px;
+    }
+    .btn-main:hover { background: var(--brand-deep); color: #fff; }
+    .btn-main[disabled] { opacity: .45; cursor: default; }
+
+    .switch { display: flex; gap: 9px; align-items: flex-start; padding: 9px 10px; border: 1px solid var(--line); border-radius: 10px; cursor: pointer; margin-bottom: 12px; }
+    .switch input { position: absolute; opacity: 0; }
+    .switch__box { flex: 0 0 34px; height: 20px; border-radius: 999px; background: var(--line); position: relative; margin-top: 1px; }
+    .switch__box::after { content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.25); transition: transform .15s; }
+    .switch input:checked + .switch__box { background: var(--brand); }
+    .switch input:checked + .switch__box::after { transform: translateX(14px); }
+    .switch__text { font-size: 12px; line-height: 1.4; }
+    .switch__text small { display: block; color: var(--ink-faint); font-size: 10.5px; margin-top: 2px; }
+
+    .warn { margin-bottom: 12px; padding: 9px 11px; border-radius: 9px; font-size: 12px; font-weight: 600; line-height: 1.45; }
+    .warn[data-state="warn"] { background: var(--warn-soft); color: var(--warn); }
+    .warn[data-state="bad"] { background: var(--bad-soft); color: var(--bad); }
+
+    .preview { padding: 20px; overflow: auto; }
+    .preview__head { font-size: 12px; color: var(--ink-faint); margin-bottom: 10px; }
+
+    @media print {
+      .side, .preview__head { display: none !important; }
+      .wrap { display: block; }
+      .preview { padding: 0; overflow: visible; }
+      body { background: #fff; }
+      /* Печатаем ОДНУ сторону за раз: лицевые всех трёх экземпляров или их
+         обороты. Выбирать нечётные страницы в диалоге не надо — их тут нет. */
+      body[data-print="front"] .sheet[data-side="back"] { display: none !important; }
+      body[data-print="back"] .sheet[data-side="front"] { display: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <aside class="side">
+      <h1>Акт на диагностику</h1>
+      <p class="sub">Три экземпляра, обе стороны: один остаётся у покупателя,
+        два уезжают на склад. В окне печати оставьте <b>100%</b> и поля «Нет».</p>
+
+      <div id="warn" class="warn" style="display:none;"></div>
+
+      <div class="facts" id="facts"></div>
+
+      <label class="switch">
+        <input type="checkbox" id="inkjet">
+        <span class="switch__box"></span>
+        <span class="switch__text">
+          <b>Струйный принтер</b>
+          <small>Листы стоят в лотке сзади. У лазерного кассета снизу и лист в ней лежит — тогда оставьте выключенным.</small>
+        </span>
+      </label>
+
+      <div class="step" id="step1">
+        <div class="step__n">Шаг 1</div>
+        <div class="step__t">Лицевые стороны</div>
+        <div class="step__d">Три листа: шапка с данными товара и текст для покупателя.</div>
+        <button class="btn-main" id="print-front">Печатать лицевые</button>
+      </div>
+
+      <div class="step" id="step2">
+        <div class="step__n">Шаг 2</div>
+        <div class="step__t">Обороты</div>
+        <div class="step__d" id="feed-hint"></div>
+        <button class="btn-main" id="print-back" disabled>Сначала шаг 1</button>
+      </div>
+    </aside>
+
+    <main class="preview">
+      <div class="preview__head">Так лист ляжет на бумагу. Проверьте номер заказа, дефект со слов покупателя и дату возврата — по ним товар вернётся владельцу.</div>
+      <div id="sheets"></div>
+    </main>
+  </div>
+  <script src="diag.js" type="module"></script>
+</body>
+</html>

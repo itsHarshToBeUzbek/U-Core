@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Uzum ПВЗ Помощник",
-  "version": "1.2.0",
-  "description": "Калькулятор инкассации и печать инфолистов",
+  "version": "2.16.0",
+  "description": "Калькулятор инкассации, печать инфолистов, актов приёма-передачи и актов на диагностику, сбор данных приёмки по кнопке",
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
@@ -20,26 +20,57 @@
   "permissions": [
     "storage",
     "activeTab",
-    "scripting"
+    "scripting",
+    "alarms",
+    "tabs"
   ],
   "host_permissions": [
-    "https://dp.uzum.uz/*"
+    "https://dp.uzum.uz/*",
+    "https://api-wms.uzum.uz/*"
+  ],
+  "optional_host_permissions": [
+    "https://generativelanguage.googleapis.com/*",
+    "https://api.openai.com/*",
+    "https://api.deepseek.com/*",
+    "https://openrouter.ai/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
   ],
   "content_scripts": [
     {
-      "matches": ["https://dp.uzum.uz/*"],
-      "js": ["content.js"],
+      "matches": [
+        "https://dp.uzum.uz/*"
+      ],
+      "js": [
+        "wms-harvester.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://dp.uzum.uz/*"
+      ],
+      "js": [
+        "wms-parse.js",
+        "content.js",
+        "placement.js"
+      ],
       "run_at": "document_idle"
     }
   ],
   "web_accessible_resources": [
     {
       "resources": [
-        "uzum_logo.png"
+        "icons/uzum_logo.svg"
       ],
       "matches": [
-        "<all_urls>"
+        "https://dp.uzum.uz/*"
       ]
     }
-  ]
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  }
 }

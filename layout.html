@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>Схема зала — U-Core</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; }
+
+    :root {
+      --ink: #17131F; --ink-soft: #57506B; --ink-faint: #8D86A3;
+      --paper: #F6F4FA; --surface: #FFFFFF; --line: #E7E2F0; --line-soft: #F1EEF7;
+      --brand: #7000FF; --brand-deep: #4A00B0; --brand-soft: #F1E7FF;
+      --good: #147A54; --good-soft: #E1F5EA;
+      --warn: #A85A17; --warn-soft: #FBEEDC;
+      --bad: #C11F3E; --bad-soft: #FCE6EA;
+      --radius-s: 6px; --radius-m: 10px;
+      --font-ui: 'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      --font-mono: 'JetBrains Mono', ui-monospace, Consolas, monospace;
+    }
+    @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+    html, body { margin: 0; padding: 0; height: 100%; }
+    body {
+      font-family: var(--font-ui); background: var(--paper); color: var(--ink);
+      -webkit-font-smoothing: antialiased; display: flex; flex-direction: column;
+      height: 100vh; overflow: hidden;
+    }
+
+    .top {
+      display: flex; align-items: center; gap: 10px; padding: 11px 18px;
+      background: var(--surface); border-bottom: 1px solid var(--line); flex: 0 0 auto;
+    }
+    .top h1 { margin: 0; font-size: 16px; font-weight: 800; }
+    .top .spacer { flex: 1; }
+    .hint { font-size: 11.5px; color: var(--ink-faint); font-weight: 600; }
+
+    button {
+      font-family: var(--font-ui); font-weight: 700; cursor: pointer; border-radius: var(--radius-s);
+      transition: background-color .12s ease, border-color .12s ease, color .12s ease;
+    }
+    .btn { background: var(--surface); color: var(--ink-soft); border: 1px solid var(--line); padding: 7px 12px; font-size: 12px; }
+    .btn:hover { border-color: var(--brand); color: var(--brand-deep); background: var(--brand-soft); }
+    .btn[data-on="1"] { background: var(--brand); color: #fff; border-color: var(--brand); }
+    .btn--primary { background: var(--brand); color: #fff; border-color: var(--brand); }
+    .btn--primary:hover { background: var(--brand-deep); color: #fff; }
+    .btn--danger:hover { border-color: var(--bad); color: var(--bad); background: var(--bad-soft); }
+
+    .main { display: flex; flex: 1 1 auto; min-height: 0; }
+    .canvas-wrap { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; padding: 14px; }
+    svg#plan { flex: 1; width: 100%; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-m); touch-action: none; }
+
+    .grid-line { stroke: var(--line-soft); stroke-width: 1; }
+    .building { fill: #fbfaff; stroke: var(--ink-faint); stroke-width: 2; stroke-dasharray: 6 4; }
+    .group-rect { fill: var(--brand-soft); stroke: var(--brand); stroke-width: 2; cursor: move; }
+    .group-rect[data-selected="1"] { fill: #e2ccff; stroke: var(--brand-deep); stroke-width: 3; }
+    .group-rect[data-unmapped="1"] { fill: var(--warn-soft); stroke: var(--warn); }
+    .group-label { font-family: var(--font-ui); font-weight: 800; font-size: 15px; fill: var(--brand-deep); pointer-events: none; user-select: none; }
+    .group-sub { font-family: var(--font-mono); font-size: 10px; fill: var(--ink-soft); pointer-events: none; user-select: none; }
+    .handle { fill: #fff; stroke: var(--brand-deep); stroke-width: 2; cursor: nwse-resize; }
+    .entrance { fill: var(--good); stroke: #fff; stroke-width: 2.5; cursor: move; }
+    .entrance-label { font-family: var(--font-ui); font-weight: 800; font-size: 11px; fill: var(--good); pointer-events: none; user-select: none; }
+    .draft { fill: rgba(112,0,255,.14); stroke: var(--brand); stroke-width: 2; stroke-dasharray: 5 4; pointer-events: none; }
+
+    /* ---------- правая панель ---------- */
+    .side {
+      width: 330px; flex: 0 0 auto; background: var(--surface); border-left: 1px solid var(--line);
+      overflow-y: auto; padding: 14px;
+    }
+    .side h2 { margin: 0 0 4px; font-size: 13.5px; font-weight: 800; }
+    .side h3 {
+      margin: 18px 0 8px; font-size: 10.5px; font-weight: 800; text-transform: uppercase;
+      letter-spacing: .05em; color: var(--ink-faint);
+    }
+    .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+    .field label { font-size: 11.5px; font-weight: 700; color: var(--ink-soft); }
+    .field input, .field select {
+      padding: 7px 9px; border: 1.5px solid var(--line); border-radius: var(--radius-s);
+      font-family: var(--font-ui); font-size: 13px; background: var(--surface); color: var(--ink); width: 100%;
+    }
+    .field input:focus, .field select:focus { outline: none; border-color: var(--brand); }
+    .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+    .note {
+      font-size: 11.5px; line-height: 1.5; color: var(--ink-soft);
+      background: var(--line-soft); padding: 9px 11px; border-radius: var(--radius-s); margin-bottom: 10px;
+    }
+    .note--warn { background: var(--warn-soft); color: var(--warn); font-weight: 600; }
+    .note--good { background: var(--good-soft); color: var(--good); font-weight: 600; }
+
+    /* ---------- сетка ячеек отдела ---------- */
+    .floor { margin-bottom: 8px; }
+    .floor__label {
+      font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-faint); font-weight: 700;
+      margin-bottom: 3px; background: none; border: none; padding: 1px 4px; border-radius: 5px;
+      cursor: pointer; text-align: left;
+    }
+    .floor__label:hover { background: var(--brand-soft); color: var(--brand); }
+
+    /* КИСТЬ: тип выбирается один раз, дальше просто наносится. */
+    .group-rect[data-phantom="1"] { stroke: var(--bad); stroke-dasharray: 6 4; fill: var(--bad-soft); }
+    .btn--bad { border-color: var(--bad); color: var(--bad); font-weight: 700; }
+    .btn--bad:hover { background: var(--bad); color: #fff; }
+    .brush { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin: 6px 0 8px; }
+    .brush__label { font-size: 11px; color: var(--ink-faint); font-weight: 700; margin-right: 2px; }
+    .brush__btn {
+      font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 999px;
+      border: 1px solid var(--line); background: var(--surface); color: var(--ink-soft); cursor: pointer;
+    }
+    .brush__btn:hover { border-color: var(--brand); color: var(--brand); }
+    .brush__btn[data-on="1"] { background: var(--brand); border-color: var(--brand); color: #fff; }
+    .cellbox[data-manual="1"] { font-weight: 800; box-shadow: inset 0 -2px 0 currentColor; }
+    .floor__cells { display: flex; gap: 4px; flex-wrap: wrap; }
+    .cellbox {
+      min-width: 46px; padding: 6px 4px; text-align: center; cursor: pointer;
+      border: 1.5px solid var(--line); border-radius: 5px; background: var(--surface);
+      font-family: var(--font-mono); font-size: 10.5px; font-weight: 600; user-select: none;
+    }
+    .cellbox[data-kind="big"] { background: var(--brand-soft); border-color: var(--brand); color: var(--brand-deep); }
+    .cellbox[data-kind="wall"] { background: var(--warn-soft); border-color: var(--warn); color: var(--warn); }
+    .cellbox[data-kind="oversize"] { background: var(--bad-soft); border-color: var(--bad); color: var(--bad); }
+    .cellbox[data-kind="none"] { background: var(--line-soft); border-style: dashed; color: var(--ink-faint); text-decoration: line-through; }
+    .cellbox[data-missing="1"] { box-shadow: 0 0 0 2px var(--bad-soft); }
+
+    .legend { display: flex; flex-wrap: wrap; gap: 8px; font-size: 10.5px; color: var(--ink-faint); font-weight: 600; margin-top: 6px; }
+    .legend span { display: inline-flex; align-items: center; gap: 4px; }
+    .legend i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; border: 1.5px solid; }
+
+    /* ---------- порядок тяжести ---------- */
+    .severity { display: flex; flex-direction: column; gap: 5px; }
+    .sev-item {
+      display: flex; align-items: center; gap: 8px; padding: 7px 10px;
+      border: 1px solid var(--line); border-radius: var(--radius-s); background: var(--surface);
+      font-size: 12px; font-weight: 600; cursor: grab;
+    }
+    .sev-item[data-drag="1"] { opacity: .4; }
+    .sev-item__n { font-family: var(--font-mono); font-weight: 700; color: var(--ink-faint); font-size: 11px; }
+    .sev-item__d { margin-left: auto; font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-faint); }
+
+    .actions { display: flex; flex-direction: column; gap: 7px; margin-top: 16px; }
+  </style>
+</head>
+<body>
+
+  <div class="top">
+    <h1>Схема зала</h1>
+    <button id="mode-draw" class="btn">Рисовать отдел</button>
+    <button id="mode-entrance" class="btn">Указать вход</button>
+    <button id="btn-delete" class="btn btn--danger">Удалить отдел</button>
+    <span class="spacer"></span>
+    <span class="hint" id="hint">Потяните мышью по плану, чтобы нарисовать отдел</span>
+    <button id="btn-save" class="btn btn--primary">Сохранить</button>
+    <button id="btn-export" class="btn">Выгрузить конфиг</button>
+  </div>
+
+  <div class="main">
+    <div class="canvas-wrap">
+      <svg id="plan" viewBox="0 0 1000 640" preserveAspectRatio="xMidYMid meet"></svg>
+    </div>
+
+    <div class="side" id="side"></div>
+  </div>
+
+  <script src="wms-parse.js"></script>
+  <script type="module" src="layout.js"></script>
+</body>
+</html>

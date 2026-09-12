@@ -167,10 +167,24 @@
       // в popup.js по той же логике, что и колонка "Инкассация" в калькуляторе).
       // savedCounts при этом всё ещё нужен — по нему определяем, пользовался
       // ли человек калькулятором вообще (см. hasSavedData ниже).
-      chrome.storage.local.get(['savedCounts', 'savedEncashCounts', 'savedBagNumber'], (data) => {
+      chrome.storage.local.get(['savedCounts', 'savedEncashCounts', 'savedBagNumber',
+                               'savedEncashBlocked'], (data) => {
         if (chrome.runtime.lastError) {
           console.error(`${LOG_PREFIX} ошибка чтения хранилища —`, chrome.runtime.lastError.message);
           alert('❌ Не удалось прочитать сохранённые данные из расширения.');
+          return;
+        }
+
+        // НЕДОСДАЧА БОЛЬШЕ СДАЧИ — В ФОРМУ НИЧЕГО НЕ ПОДСТАВЛЯЕМ.
+        //
+        // Калькулятор в таком случае честно не считает раскладку: покрыть
+        // такую недостачу нечем. Заполнить форму «хоть чем-то» значит
+        // подсказать оператору неверное действие с деньгами, и заметит он
+        // это в лучшем случае у банка.
+        if (data.savedEncashBlocked) {
+          alert('❌ Авто-заполнение отключено.\n\nНедосдача больше 500 000 — покрыть её сдачей '
+              + 'нельзя. Откройте расширение, вкладка «Инкассация», и разберитесь с деньгами: '
+              + 'подставлять числа в кассу в таком виде нельзя.');
           return;
         }
 
@@ -301,6 +315,97 @@
     return null;
   }
 
+  // ---------- Имя оператора для бланка инкассации ----------
+  // В акте есть строка «Хужалик юритувчи субъект рахбари» — фамилия того,
+  // кто сдаёт деньги. В банке её сверяют, и подставлять туда чужую фамилию
+  // из образца нельзя. WMS показывает её в левом нижнем углу в том самом
+  // виде, в каком она должна попасть в бланк: «MURODOV M.».
+  //
+  // Ищем по ФОРМЕ значения, а не по классу: вёрстка WMS меняется от релиза
+  // к релизу, а «ФАМИЛИЯ И.» — не меняется. Чтобы не поймать похожую строку
+  // из таблицы заказов, берём только то, что стоит в нижней левой четверти
+  // окна, и только самый глубокий узел с таким текстом.
+  const WMS_NAME_RE = /^[A-ZА-ЯЁ][A-ZА-ЯЁ'`\-]{1,}\s+[A-ZА-ЯЁ]\.$/;
+  let lastSyncedName = null;
+
+  // ПОЛНОЕ ФИО — для актов на диагностику и приёма-передачи. Там подпись
+  // стоит целиком: «MURODOV MUHAMMADSAID BAXTIYOR O'G'LI», а не «MURODOV M.».
+  // Ищем его тоже по форме, но с якорем: первое слово ОБЯЗАНО совпасть с
+  // фамилией из короткого имени, которое мы уже нашли в левом нижнем углу.
+  // Без этого якоря сюда попадало бы любое написанное капслоком название из
+  // таблицы заказов; с ним — только строка про того же человека.
+  const WMS_FULL_RE = /^[A-ZА-ЯЁ][A-ZА-ЯЁ'`ʻ’\-]{1,}(?:\s+[A-ZА-ЯЁ][A-ZА-ЯЁ'`ʻ’\-]{1,}){1,4}$/;
+  let lastSyncedFullName = null;
+
+  function findOperatorName() {
+    const h = window.innerHeight, w = window.innerWidth;
+    let best = null;
+    for (const el of document.body.querySelectorAll('*')) {
+      if (el.children.length) continue;                 // только листовые узлы
+      const text = (el.textContent || '').trim();
+      if (text.length > 40 || !WMS_NAME_RE.test(text)) continue;
+      const r = el.getBoundingClientRect();
+      if (!r.width || !r.height) continue;
+      if (r.top < h * 0.6 || r.left > w * 0.45) continue;   // не левый низ — не оно
+      // Из нескольких кандидатов берём самый нижний и самый левый.
+      const score = r.top - r.left * 0.2;
+      if (!best || score > best.score) best = { text, score };
+    }
+    return best ? best.text : null;
+  }
+
+  /** Полное ФИО того же человека: первое слово — фамилия из короткого имени. */
+  function findOperatorFullName(shortName) {
+    const surname = String(shortName || '').split(/\s+/)[0];
+    if (!surname || surname.length < 3) return null;
+    let best = null;
+    for (const el of document.body.querySelectorAll('*')) {
+      // Полное ФИО часто висит в подсказке, а на экране обрезано многоточием.
+      const candidates = [el.getAttribute && el.getAttribute('title'),
+                          el.getAttribute && el.getAttribute('aria-label'),
+                          el.children.length ? null : el.textContent];
+      for (const raw of candidates) {
+        const text = (raw || '').trim().replace(/\s+/g, ' ');
+        if (!text || text.length > 70) continue;
+        if (WMS_NAME_RE.test(text)) continue;             // это короткая форма
+        if (!WMS_FULL_RE.test(text)) continue;
+        if (text.split(' ')[0] !== surname) continue;     // другой человек
+        // Из нескольких вариантов берём самый полный: обрезанный вариант
+        // подписать акт не годится.
+        if (!best || text.length > best.length) best = text;
+      }
+    }
+    return best;
+  }
+
+  function syncOperatorName() {
+    const name = findOperatorName();
+    if (!name || name === lastSyncedName) return;
+    lastSyncedName = name;
+    try {
+      chrome.storage.local.set({ wmsUserName: name, wmsUserNameAt: Date.now() }, () => {
+        if (chrome.runtime.lastError) return;
+        console.log(`${LOG_PREFIX} имя для бланка инкассации: ${name}`);
+      });
+    } catch (err) {
+      if (!isContextInvalidated(err)) console.error(`${LOG_PREFIX} не удалось прочитать имя оператора:`, err);
+    }
+  }
+
+  function syncOperatorFullName() {
+    const full = findOperatorFullName(lastSyncedName || findOperatorName());
+    if (!full || full === lastSyncedFullName) return;
+    lastSyncedFullName = full;
+    try {
+      chrome.storage.local.set({ wmsUserFullName: full, wmsUserFullNameAt: Date.now() }, () => {
+        if (chrome.runtime.lastError) return;
+        console.log(`${LOG_PREFIX} полное ФИО для актов: ${full}`);
+      });
+    } catch (err) {
+      if (!isContextInvalidated(err)) console.error(`${LOG_PREFIX} не удалось прочитать ФИО оператора:`, err);
+    }
+  }
+
   // ---------- Автоматическое чтение "Сумма в WMS" ----------
   // На главной странице "Касса" (когда смена уже открыта) сумма показана в
   // виджете work-shift-balance под заголовком "В кассе наличных" — это и есть
@@ -428,4 +533,176 @@
   // или на уже открытой смене (главная страница "Касса").
   injectButtonIfNeeded();
   syncWmsBalanceFromDom();
+
+  // Имя в углу не меняется в течение смены, а обход всех узлов страницы —
+  // не то, что стоит делать на каждое изменение DOM. Смотрим редко.
+  const syncNames = () => { syncOperatorName(); syncOperatorFullName(); };
+  syncNames();
+  setInterval(syncNames, 60_000);
+})();
+// ==========================================
+// ПРИЁМКА: связь расширения с WMS
+// ==========================================
+// Отдельный IIFE — логика инкассации выше не затронута ни одной строкой.
+//
+// ЧТО ЗДЕСЬ ОСТАЛОСЬ И ЧЕГО БОЛЬШЕ НЕТ.
+//
+// Раньше этот блок непрерывно подслушивал страницу: копировал каждый ответ
+// WMS, разбирал его наугад, запоминал «шаблоны запросов», подчищал DOM. Из
+// этого рождался мусор в таблице, а каждая новая заплатка порождала
+// следующую. Данные теперь приходят ТОЛЬКО двумя путями:
+//
+//   1) оператор нажал кнопку сбора — расширение само спрашивает WMS по
+//      известным адресам (см. WMS-API-NOTES.md), а страница лишь выполняет
+//      запрос своими руками, потому что у неё живой токен;
+//   2) оператор загрузил CSV-выгрузку из WMS.
+//
+// Здесь остались ровно три вещи:
+//   * переслать в расширение заголовок авторизации, увиденный перехватчиком;
+//   * запомнить номер ПВЗ (он есть в адресе любого запроса WMS);
+//   * мост: попросить страницу выполнить запрос и вернуть ответ.
+//
+// Ничего не разбирается и ничего не сохраняется в таблицу — это делает
+// background.js, и только по нажатию.
+
+(function () {
+  'use strict';
+
+  const LOG_PREFIX = '[U-Core Приёмка]';
+  const CHANNEL = 'ucore-wms';
+
+  function contextInvalidated(err) {
+    return /Extension context invalidated|message port closed/i.test(String(err && err.message || err));
+  }
+
+  // ---------- мост: расширение просит страницу сходить за данными ----------
+  // Запрос выполняет САМА СТРАНИЦА: у неё правильный origin и свежий токен,
+  // который приложение обновляет само. Расширение ничего не имитирует.
+
+  const pageFetches = new Map();
+  let fetchSeq = 0;
+
+  function askPageToFetch(url, options = {}, timeoutMs = 30000) {
+    return new Promise((resolve) => {
+      const id = `f${++fetchSeq}_${Date.now()}`;
+      const timer = setTimeout(() => {
+        pageFetches.delete(id);
+        resolve({ ok: false, error: 'страница не ответила вовремя' });
+      }, timeoutMs);
+      pageFetches.set(id, { resolve, timer });
+      try {
+        window.postMessage({
+          __ucore: 'ucore-fetch', id, url,
+          method: options.method || 'GET',
+          body: options.body || null
+        }, location.origin);
+      } catch (err) {
+        clearTimeout(timer);
+        pageFetches.delete(id);
+        resolve({ ok: false, error: 'не удалось передать запрос странице' });
+      }
+    });
+  }
+
+  // ---------- сообщения от перехватчика ----------
+
+  let lastDpKey = null;
+
+  window.addEventListener('message', (event) => {
+    if (event.source !== window) return;
+    const data = event.data;
+    if (!data || data.__ucore !== CHANNEL || !data.entry) return;
+
+    // Ответ на запрос, который расширение попросило сделать страницу.
+    if (data.entry.__fetchResult) {
+      const pending = pageFetches.get(data.entry.__fetchResult.id);
+      if (pending) {
+        pageFetches.delete(data.entry.__fetchResult.id);
+        clearTimeout(pending.timer);
+        pending.resolve(data.entry.__fetchResult);
+      }
+      return;
+    }
+
+    // Заголовок авторизации. Значения не печатаем: это учётные данные.
+    if (data.entry.__authHeaders) {
+      try {
+        chrome.storage.local.set({
+          priemkaAuth: { headers: data.entry.__authHeaders, at: Date.now(), origin: location.origin }
+        }, () => {
+          if (chrome.runtime.lastError) return;
+          console.log(`${LOG_PREFIX} авторизация подхвачена`);
+        });
+      } catch (err) {
+        if (!contextInvalidated(err)) console.warn(`${LOG_PREFIX} не удалось сохранить авторизацию`);
+      }
+    }
+  });
+
+  // ---------- адрес API и номер ПВЗ ----------
+  // Два факта, которых нет в коде и не должно быть: на каком хосте живёт
+  // API и какой у этого ПВЗ номер. Оба видны в адресах запросов, которые
+  // страница делает сама. Ответы при этом НЕ читаются — только адреса.
+
+  let lastApiBase = null;
+
+  function noteFrom(url) {
+    let parsed;
+    try {
+      parsed = new URL(url, location.href);
+    } catch (e) {
+      return;
+    }
+
+    // Хост API. У ТАШ-120 это api-wms.uzum.uz — НЕ тот, где открыта
+    // страница. Зашивать его в код нельзя: этот проект уже пять раз молча
+    // ломался из-за захардкоженного домена, и ни один тест до него не
+    // дотягивался. Берём из адреса запроса, который страница сделала сама.
+    if (/^\/(de|or)\//.test(parsed.pathname) && parsed.origin !== lastApiBase) {
+      lastApiBase = parsed.origin;
+      chrome.storage.local.set({ priemkaApiBase: parsed.origin });
+    }
+
+    // Номер ПВЗ. WMS передаёт его почти в каждом запросе — то как dpKey,
+    // то как deliveryPointKey.
+    const dp = parsed.searchParams.get('dpKey') || parsed.searchParams.get('deliveryPointKey');
+    if (dp && /^\d+$/.test(dp) && dp !== lastDpKey) {
+      lastDpKey = dp;
+      chrome.storage.local.set({ priemkaDpKey: dp });
+    }
+  }
+
+  // PerformanceObserver знает обо всех запросах страницы и ничего к ним не
+  // добавляет: он не перехватывает, не копирует тела и не может ничего
+  // сломать. Ровно то, что нужно, — увидеть адреса и больше ничего.
+  try {
+    const seen = new PerformanceObserver((list) => {
+      for (const entry of list.getEntries()) noteFrom(entry.name);
+    });
+    seen.observe({ entryTypes: ['resource'] });
+    for (const entry of performance.getEntriesByType('resource')) noteFrom(entry.name);
+  } catch (e) { /* без него сбор просто попросит выбрать ПВЗ */ }
+
+  // ---------- запросы из расширения ----------
+
+  try {
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      if (message && message.type === 'ucore:page-fetch') {
+        askPageToFetch(message.url, { method: message.method, body: message.body })
+          .then(sendResponse);
+        return true;
+      }
+      return undefined;
+    });
+  } catch (err) {
+    console.warn(`${LOG_PREFIX} не удалось подписаться на сообщения расширения:`, err);
+  }
+
+  // Сообщаем перехватчику, что слушатель готов: он встал раньше нас и мог
+  // уже отправить авторизацию в пустоту (см. рукопожатие в wms-harvester.js).
+  try {
+    window.postMessage({ __ucore: 'ucore-ready' }, location.origin);
+  } catch (err) { /* не критично: следующий же запрос страницы всё донесёт */ }
+
+  console.log(`${LOG_PREFIX} мост к WMS готов (только чтение, только по кнопке).`);
 })();
