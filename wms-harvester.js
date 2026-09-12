@@ -161,7 +161,12 @@
   // ---------- 2. Запрос по просьбе расширения ----------
 
   const ALLOWED_PATH = /^\/(de|or)\//;
-  const FORBIDDEN_PATH = /(acceptance|item-acceptance|encashment|withdraw|assign-identifier|place-return|complete|confirm|cancel|adjustment)/i;
+  // Список тот же, что в wms-api.js. Он повторён здесь намеренно — это
+  // последняя проверка перед самим запросом, и она стоит в странице, куда
+  // расширение уже не дотянется. Расходиться списки не должны: `issue/request`
+  // стоял только в одном из них, и запрос, отвергнутый расширением, страница
+  // выполнила бы.
+  const FORBIDDEN_PATH = /(acceptance|item-acceptance|encashment|withdraw|assign-identifier|place-return|complete|confirm|cancel|issue\/request|adjustment)/i;
 
   // ЕДИНСТВЕННЫЙ разрешённый POST — справочник товаров. Тело: список
   // числовых id, ответ: названия и габариты. Он ничего не меняет, но всё
