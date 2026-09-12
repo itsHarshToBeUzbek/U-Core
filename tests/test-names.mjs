@@ -164,4 +164,129 @@ test('оценка помечается, чтобы её не приняли з�
   eq(S.weightText({ kg: null }), '', 'нечем считать — а что-то написали');
 });
 
+// ------------------------------------------------------------------
+suite('строение названия: режем витрину, а не товар');
+
+// Все примеры — из выгрузки ТАШ-120 от 12.09.2026, 617 названий.
+// Выдуманных здесь нет: на выдуманных этот алгоритм и прошёл бы.
+
+test('хвост после первой запятой — ключевые слова, а не товар', () => {
+  eq(S.segment('Chigo konditsioner pulti sovitish/isitish, turbo, taymer'),
+     'Chigo konditsioner pulti sovitish/isitish');
+});
+
+test('скобки в голову не входят', () => {
+  eq(S.segment("Qizlar uchun to'rli bluzka (Yoshga qarab: 8 лет, Rang: Oq)"),
+     "Qizlar uchun to'rli bluzka");
+});
+
+test('запятой нет — режется нечего', () => {
+  eq(S.segment('Harry Potter stikerlari'), 'Harry Potter stikerlari');
+});
+
+test('ОДНА МАРКА — НЕ НАЗВАНИЕ: голова дотягивается следующим куском', () => {
+  // «NOW Foods» на полке не говорит ни о чём.
+  eq(S.segment('NOW Foods, 5-Gidroksitriptofan (5-HTP), 50 mg, 30 kapsulalar'),
+     'NOW Foods, 5-Gidroksitriptofan');
+});
+
+test('точка режет предложение, но не дробное число', () => {
+  eq(S.segment('Suv Hydrolife 1.5 L 6 dona'), 'Suv Hydrolife 1.5 L 6 dona');
+  ok(S.segment('Mustahkam shtanga. Kronshteyn va vintlar bilan').startsWith('Mustahkam shtanga'));
+});
+
+test('незнакомое название теперь короче, но ни одного нового слова в нём нет', () => {
+  const full = "Qizlar uchun oq maktab bluzkasi, uzun yengli, 100% paxta, 130–170 (Yoshga qarab bolalar kiyimining o'lchamlari: 6 лет, Rang: Oq)";
+  const short = S.shortName(full);
+  no(short.known, 'словарь вдруг узнал это название');
+  ok(short.simplified, 'хвост витрины не срезан');
+  ok(short.text.length < full.length / 2, `вышло ${short.text.length} из ${full.length}`);
+  ok(short.text.includes('bluzkasi'), short.text);
+  ok(short.text.includes('6 лет'), `размер потерян: ${short.text}`);
+  ok(short.text.includes('белый'), `цвет потерян: ${short.text}`);
+});
+
+test('две одинаковые блузки расходятся по размеру', () => {
+  const a = S.shortName("Qizlar uchun oq maktab bluzkasi, uzun yengli (Yoshga qarab: 6 лет, Rang: Oq)").text;
+  const b = S.shortName("Qizlar uchun oq maktab bluzkasi, uzun yengli (Yoshga qarab: 7 лет, Rang: Oq)").text;
+  ok(a !== b, `обе позиции в одной ячейке выглядят одинаково: «${a}»`);
+});
+
+test('количество не приписывается вторым разом', () => {
+  eq(S.shortName('Suv Hydrolife 1.5 L 6 dona').text, 'Suv Hydrolife 1.5 L 6 dona');
+});
+
+// ------------------------------------------------------------------
+suite('все количества, а не первое попавшееся');
+
+test('и счёт, и объём видны оба', () => {
+  const all = S.quantities('Shampun Head Shoulders 2 dona 400 ml');
+  eq(all.length, 2);
+  ok(all.some(q => q.unit === 'шт' && q.value === 2));
+  ok(all.some(q => q.unit === 'мл' && q.value === 400));
+});
+
+test('показываем массу, а не счёт: «400 мл» говорит больше, чем «2 шт»', () => {
+  eq(S.quantity('Shampun Head Shoulders 2 dona 400 ml').unit, 'мл');
+});
+
+test('«gr» — это граммы', () => {
+  // 15 названий из 617 написаны через gr. Единицы не было в таблице, и
+  // товар молча оставался без веса.
+  eq(S.quantity('Krem 50 gr').unit, 'г');
+  eq(S.quantity('Krem 50 гр').unit, 'г');
+});
+
+// ------------------------------------------------------------------
+suite('вес упаковки из нескольких штук');
+
+test('шесть бутылок по 1,5 л — это девять килограммов', () => {
+  // Раньше выходило 1,5 кг, и упаковка уезжала на верхнюю полку.
+  const w = S.weightKg(null, 'Suv Hydrolife 1.5 L 6 dona');
+  eq(w.kg, 9);
+  no(w.exact, 'счёт пачки прочитан как факт, а он не всегда однозначен');
+});
+
+test('26 пакетиков по 75 г — почти два килограмма', () => {
+  const w = S.weightKg(null, "Felix nam ovqat mushuklar uchun, 75 gr 26 dona");
+  ok(w.kg > 1.9 && w.kg < 2.0, `вышло ${w.kg}`);
+});
+
+test('ЗАПЯТАЯ МЕЖДУ НИМИ — РАЗНЫЕ ВЕЩИ, не умножаем', () => {
+  // «воск 100 г, шпателей 6 штук» — это не 600 граммов воска.
+  const w = S.weightKg(null, "Depilatsiya to'plami, granullangan mum 100 g, shpatelar 6 dona");
+  eq(w.kg, 0.1);
+  ok(w.exact);
+});
+
+test('счёт без массы весом не становится', () => {
+  eq(S.weightKg(null, 'Salfetka 100 dona').kg, null);
+});
+
+test('одна масса без счёта — точный вес', () => {
+  const w = S.weightKg(null, 'Guruch Lazer 5 kg');
+  eq(w.kg, 5);
+  ok(w.exact);
+});
+
+test('«сокращено» и «как в WMS» — разные ответы', () => {
+  // Под сокращённым названием нельзя писать «как в WMS»: в WMS его нет.
+  eq(S.displayName('Chigo konditsioner pulti sovitish/isitish, turbo, taymer').by, 'сокращено');
+  eq(S.displayName('Harry Potter stikerlari').by, 'как в WMS');
+  eq(S.displayName('Bolalar atir sovuni, 140 g').by, 'словарь');
+});
+
+test('сохранённый перевод модели важнее словаря', () => {
+  const full = 'Bolalar atir sovuni, 140 g';
+  const shown = S.displayName(full, { text: 'Мыло детское, 140 г', src: S.srcKey(full), by: 'модель' });
+  eq(shown.by, 'модель');
+  eq(shown.text, 'Мыло детское, 140 г');
+});
+
+test('перевод чужого названия не подставляется', () => {
+  const shown = S.displayName('Bolalar atir sovuni, 140 g',
+                              { text: 'Рюкзак школьный', src: 'другое-название', by: 'модель' });
+  no(shown.text === 'Рюкзак школьный', 'перевод от другого товара встал на место');
+});
+
 process.exit(report('Словарь названий'));

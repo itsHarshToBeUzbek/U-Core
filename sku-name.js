@@ -232,20 +232,170 @@
   }
 
   // ---------- количество ----------
-  const UNIT_RU = { kg: 'кг', g: 'г', l: 'л', ml: 'мл', dona: 'шт', ta: 'шт' };
+  // «gr» и «гр» приезжают наравне с «g»: на выгрузке ТАШ-120 от 12.09.2026
+  // это 15 названий и 2 названия против 29. В таблице их не было, и единица
+  // оставалась как есть — «gr», — а весом такое уже не считалось: пятнадцать
+  // товаров молча оставались без веса.
+  const UNIT_RU = { kg: 'кг', g: 'г', gr: 'г', 'гр': 'г', l: 'л', ml: 'мл',
+                    dona: 'шт', ta: 'шт' };
   // Граница слова здесь НЕ \b: в JS кириллица не считается словом, и «30 мл»
   // в конце строки не находилось вовсе — русские названия теряли количество.
-  const QTY_RE = /(\d+(?:[.,]\d+)?)\s*(kg|кг|gr|гр|g|г|l|л|ml|мл|dona|шт)(?![а-яёa-z])/i;
+  const QTY_RE = /(\d+(?:[.,]\d+)?)\s*(kg|кг|gr|гр|g|г|l|л|ml|мл|dona|ta|шт)(?![а-яёa-z])/ig;
 
-  /** Сколько товара: число и единица, приведённые к русскому написанию. */
+  /** Единицы массы и объёма — то, из чего считается вес. «шт» сюда не входит. */
+  const MASS_UNITS = new Set(['кг', 'г', 'л', 'мл']);
+
+  /**
+   * Стоят ли два количества рядом — то есть описывают ли они одну вещь.
+   * Запятая, точка или скобка между ними означает, что вещи разные.
+   */
+  function adjacent(source, a, b) {
+    const from = Math.min(a.end, b.end);
+    const to = Math.max(a.at, b.at);
+    if (to <= from) return true;
+    return !/[,.;()]/.test(String(source).slice(from, to));
+  }
+
+  const toKg = (q) => {
+    if (q.unit === 'кг' || q.unit === 'л') return q.value;
+    if (q.unit === 'г' || q.unit === 'мл') return q.value / 1000;
+    return null;
+  };
+
+  /**
+   * ВСЕ количества названия, а не первое попавшееся.
+   *
+   * Первое попавшееся обходилось дорого. «Shampun 2 dona 400 ml» отдавало
+   * «2 шт», и 400 мл терялись: веса у товара не оказывалось вовсе. А
+   * «Suv 1.5 L 6 dona» отдавало полтора литра там, где на полку встаёт
+   * девять килограммов упаковки — и она уезжала наверх.
+   *
+   * Позиция каждого совпадения нужна дальше: по ней видно, стоят число и
+   * единица рядом или между ними запятая.
+   */
+  function quantities(name) {
+    const source = String(name || '');
+    const out = [];
+    QTY_RE.lastIndex = 0;
+    let m;
+    while ((m = QTY_RE.exec(source)) !== null) {
+      const value = Number(String(m[1]).replace(',', '.'));
+      if (!Number.isFinite(value) || value <= 0) continue;
+      const raw = m[2].toLowerCase();
+      const unit = UNIT_RU[raw] || (raw === 'гр' ? 'г' : raw);
+      out.push({
+        value, unit,
+        text: `${m[1].replace('.', ',')} ${unit}`,
+        at: m.index, end: m.index + m[0].length,
+        mass: MASS_UNITS.has(unit)
+      });
+    }
+    return out;
+  }
+
+  /**
+   * Одно количество — то, которое стоит показать человеку.
+   *
+   * Масса и объём важнее счёта: «400 мл» говорит о вещи больше, чем «2 шт».
+   * Если счёт есть, а массы нет — показываем счёт.
+   */
   function quantity(name) {
-    const m = QTY_RE.exec(String(name || ''));
-    if (!m) return null;
-    const value = Number(String(m[1]).replace(',', '.'));
-    if (!Number.isFinite(value) || value <= 0) return null;
-    const raw = m[2].toLowerCase();
-    const unit = UNIT_RU[raw] || (raw === 'гр' ? 'г' : raw);
-    return { value, unit, text: `${m[1].replace('.', ',')} ${unit}` };
+    const all = quantities(name);
+    if (!all.length) return null;
+    const pick = all.find(q => q.mass) || all[0];
+    return { value: pick.value, unit: pick.unit, text: pick.text };
+  }
+
+  // ---------- строение названия ----------
+  //
+  // ОТКУДА ЭТО ВЗЯТО. Замер на выгрузке ТАШ-120 от 12.09.2026: 617 названий,
+  // из них 498 узбекских. Словарь главных слов узнал из них НОЛЬ — при том
+  // что на срезе, по которому он составлялся, узнавал 54 из 55. Список того,
+  // что заказывают люди, не закрыт: в одной поставке приехали плата Arduino,
+  // стикеры Harry Potter, 5-HTP в капсулах, бигуди и паста для хрома. Ни один
+  // словарь этого не догонит, и дописывать его бесполезно.
+  //
+  // Зато у названий есть СТРОЕНИЕ, и оно от словаря не зависит:
+  //
+  //   Qizlar uchun oq maktab bluzkasi, uzun yengli, 100% paxta, 130–170 (…)
+  //   [========== суть ==============][===== витрина: ключевые слова =====]
+  //
+  // До первой запятой стоит сам товар, после — то, по чему его ищут на
+  // витрине. На тех же 498 названиях: 86 знаков в среднем до реза, 34 после.
+  // Это не перевод и не догадка — это выброшенный хвост, а весь оригинал
+  // остаётся в подсказке и в поиске.
+  //
+  // ЧЕМ ЭТО ОПАСНО И ПОЧЕМУ ВСЁ РАВНО МОЖНО. Две разные вещи могут срезаться
+  // в одну строку, а название на полке нужно ровно за тем, чтобы отличить
+  // две позиции в одной ячейке. Проверено на тех же данных: 82 названия
+  // срезаются в 37 одинаковых голов, и ВСЕ 82 расходятся обратно, как только
+  // к голове добавлены цвет, размер и количество. Неразличимых не осталось
+  // ни одного — поэтому атрибуты собираются из всей строки, а не из головы.
+
+  // Послелоги: если голова кончается на них, главное слово стоит В НАЧАЛЕ.
+  // «Krossovkalar erkaklar uchun» — кроссовки для мужчин, а не «для».
+  const POSTPOSITIONS = new Set(['uchun', 'bilan', 'va', 'yoki', 'uchunmi']);
+
+  /**
+   * Суть названия: всё до первой запятой или скобки.
+   *
+   * Точка режет только когда это конец предложения («… shtanga. Kronshteyn
+   * va vintlar bilan»), а не разделитель дробного числа: «1.5 L» обязано
+   * остаться целым.
+   */
+  // Ниже этой длины голова почти наверняка не товар, а марка: «NOW Foods»,
+  // «WEERIT Basic». Такую голову дотягиваем следующим куском — «NOW Foods»
+  // на полке не говорит ни о чём, а «NOW Foods, 5-Gidroksitriptofan» говорит.
+  const HEAD_MIN = 16;
+
+  function segment(name) {
+    const source = String(name || '').trim();
+    const parts = [];
+    let rest = source;
+    // Скобки целиком уходят в атрибуты, поэтому голову набираем только из
+    // текста до первой скобки.
+    const paren = rest.search(/\(/);
+    if (paren > 0) rest = rest.slice(0, paren);
+
+    while (rest.length) {
+      // Точка режет только конец предложения, а не дробное число: «1.5 L»
+      // обязано остаться целым.
+      const cut = rest.search(/,|\.\s+(?=[A-ZА-ЯЁ])/);
+      const piece = (cut < 0 ? rest : rest.slice(0, cut)).trim();
+      rest = cut < 0 ? '' : rest.slice(cut + 1);
+      if (piece) parts.push(piece);
+      if (parts.join(', ').length >= HEAD_MIN) break;
+    }
+
+    return parts.join(', ').replace(/\s+/g, ' ').replace(/[\s.;:–—-]+$/, '').trim();
+  }
+
+  /**
+   * Атрибуты из скобок: «(Rang: Oq, Hajmi: M(42-44))».
+   *
+   * Берём значение после двоеточия. Ключ не разбираем: продавцы пишут его
+   * как хотят («Hajmi», «O'lcham», «Yoshga qarab bolalar kiyimining
+   * o'lchamlari»), и список этих написаний закрыт не будет — ровно как
+   * список товаров.
+   */
+  function bracketAttrs(name) {
+    const out = [];
+    for (const group of String(name || '').match(/\(([^)]*)\)/g) || []) {
+      const inner = group.slice(1, -1);
+      for (const part of inner.split(',')) {
+        const at = part.indexOf(':');
+        if (at < 0) continue;
+        const value = part.slice(at + 1).trim();
+        if (value) out.push(value);
+      }
+    }
+    return out;
+  }
+
+  /** Как цвет написан в самом названии — чтобы не приписать его дважды. */
+  function rawColor(name) {
+    const inside = /\((?:[^)]*?)(?:rang|цвет)\s*:\s*([^,)]+)/i.exec(String(name || ''));
+    return inside ? inside[1].trim() : '';
   }
 
   /** Цвет из «(Rang: Moviy)» — в нужном роде. */
@@ -311,8 +461,36 @@
 
     const found = head(source);
     if (!found) {
+      // Главное слово незнакомо — ВЫДУМЫВАТЬ ПЕРЕВОД НЕЛЬЗЯ, и мы его не
+      // выдумываем. Но показывать все восемьдесят шесть знаков витрины тоже
+      // незачем: хвост после первой запятой — ключевые слова для поиска,
+      // а не товар. Режем хвост, возвращаем суть и приписываем к ней цвет,
+      // размер и количество, чтобы две похожие позиции в одной ячейке не
+      // слились в одну строку.
+      //
+      // Здесь не добавлено ни одного слова, которого не было в оригинале.
       const q = quantity(source);
-      return { text: source, known: false, quantity: q };
+      const suffix = [];
+      const c = color(source, 'm');
+      for (const value of bracketAttrs(source)) {
+        // Цвет уже переведён отдельной строкой — второй раз, да ещё
+        // по-узбекски, он не нужен.
+        if (c && norm(value) === norm(rawColor(source))) continue;
+        suffix.push(value);
+      }
+      const core = segment(source);
+      // Количество приписываем, только если его нет в самой голове: «Suv
+      // Hydrolife 1.5 L 6 dona, 1,5 л» — это одно и то же, сказанное дважды.
+      // Сравниваем РАЗОБРАННЫЕ количества, а не строки: в голове стоит
+      // «1.5 L» латиницей, а q.text уже приведён к «1,5 л» — как строки они
+      // не совпадут никогда, и количество приписалось бы вторым разом.
+      const inCore = quantities(core);
+      const said = q && inCore.some(x => x.value === q.value && x.unit === q.unit);
+      if (q && !said) suffix.push(q.text);
+      if (c) suffix.push(c);
+
+      const text = core.length >= 3 ? [core, ...suffix].join(', ') : source;
+      return { text, known: false, simplified: core.length >= 3 && text !== source, quantity: q };
     }
 
     const [, ru, gender, density] = found;
@@ -344,14 +522,30 @@
    */
   function weightKg(sku, name) {
     const source = String(name || (sku && sku.name) || '');
-    const q = quantity(source);
-    if (q) {
-      if (q.unit === 'кг') return { kg: q.value, exact: true, from: 'название' };
-      if (q.unit === 'г') return { kg: q.value / 1000, exact: true, from: 'название' };
+    const all = quantities(source);
+    const mass = all.find(q => q.mass);
+
+    if (mass) {
       // Литры считаем как килограммы: бытовая химия и вода отличаются
       // процентами, а полка от этого не меняется.
-      if (q.unit === 'л') return { kg: q.value, exact: true, from: 'название' };
-      if (q.unit === 'мл') return { kg: q.value / 1000, exact: true, from: 'название' };
+      const one = toKg(mass);
+
+      // УПАКОВКА ИЗ НЕСКОЛЬКИХ ШТУК. «Felix nam ovqat …, 75 gr 26 dona» —
+      // это не 75 граммов, а без малого два килограмма, и на полку встаёт
+      // именно это. Умножаем ТОЛЬКО когда счёт стоит рядом с массой, без
+      // запятой между ними: на живых данных запятая означает, что описаны
+      // разные вещи («granullangan mum 100 g, shpatelar 6 dona» — воск и
+      // шесть шпателей, и пятьсот граммов воска отсюда не следует).
+      const count = all.find(q => !q.mass && q.value > 1 && adjacent(source, mass, q));
+      if (count) {
+        return {
+          kg: Math.round(one * count.value * 100) / 100,
+          exact: false,           // «75 гр 26 донa» читается однозначно не всегда
+          from: `${mass.text} × ${count.value}`,
+          pack: count.value
+        };
+      }
+      return { kg: one, exact: true, from: 'название' };
     }
 
     const l = Number(sku && sku.length);
@@ -503,11 +697,18 @@
       return { text: cached.text, by: cached.by || 'модель' };
     }
     const short = shortName(full);
-    return { text: short.text || full, by: short.known ? 'словарь' : 'как в WMS' };
+    // Три РАЗНЫХ ответа, и путать их нельзя. «Словарь» — название переведено.
+    // «Сокращено» — не переведено, но срезан хвост витрины: слова в строке
+    // те же, что в WMS, просто их меньше. «Как в WMS» — не тронуто вовсе.
+    // Раньше последние два назывались одинаково, и строка «как в WMS»
+    // стояла под текстом, которого в WMS нет.
+    const by = short.known ? 'словарь' : (short.simplified ? 'сокращено' : 'как в WMS');
+    return { text: short.text || full, by };
   }
 
   root.UCoreSkuName = {
-    shortName, quantity, color, head, weightKg, weightText, norm,
+    shortName, quantity, quantities, color, head, weightKg, weightText, norm,
+    segment, bracketAttrs,
     checkTranslation, srcKey, displayName, LLM_MAX_CHARS,
     // словари наружу: тесты и будущее пополнение
     HEADS, COLORS, MODS

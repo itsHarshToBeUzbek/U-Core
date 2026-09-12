@@ -1563,7 +1563,9 @@ function pkShortName(record) {
   if (!lib) return { text: full, full };
   // Сохранённый перевод модели важнее словаря — см. displayName.
   const shown = lib.displayName(full, (pkState.names || {})[record.barcode]);
-  return { text: shown.text || full, full, known: shown.by !== 'как в WMS', by: shown.by };
+  // «Узнано» — это только перевод словарём или моделью. Сокращённое
+  // название переводом не является: слова в нём узбекские, просто их меньше.
+  return { text: shown.text || full, full, known: shown.by === 'словарь' || shown.by === 'модель', by: shown.by };
 }
 
 const SOURCE_LABELS = {
