@@ -447,7 +447,14 @@ function finish() {
 // ------------------------------------------------------------------
 
 function exportCsv() {
-  const head = ['Ячейка', 'Заказ', 'PID', 'ШК товара', 'Товар', 'Единица', 'Габариты мм',
+  // «Оригинал WMS» — название ровно то, что отдал WMS, без сокращения.
+  //
+  // Без него выгрузку нельзя замерить: в колонке «Товар» лежит УЖЕ
+  // сокращённое название, и прогон его через алгоритм второй раз меряет не
+  // алгоритм, а самого себя. Полезно и оператору: если короткое название
+  // непонятно, рядом в той же строке стоит полное.
+  const head = ['Ячейка', 'Заказ', 'PID', 'ШК товара', 'Товар', 'Оригинал WMS',
+                'Единица', 'Габариты мм',
                 'Клиент', 'Телефон', 'ГМ', 'Источник', 'Партнёр', 'Номер WMS'];
   const esc = (v) => {
     const t = v === null || v === undefined ? '' : String(v);
@@ -457,7 +464,7 @@ function exportCsv() {
   for (const r of filtered()) {
     const sku = skuOf(r) || {};
     lines.push([
-      r.cell, r.orderId || r.orderBarcode, r.pid, r.barcode, nameOf(r), sku.unit,
+      r.cell, r.orderId || r.orderBarcode, r.pid, r.barcode, nameOf(r), fullNameOf(r), sku.unit,
       sku.length ? `${sku.length}x${sku.width}x${sku.height}` : '',
       r.clientName, r.phone, r.gm, SRC[r.source] || r.source, r.partner, r.wmsOrderId
     ].map(esc).join(';'));
@@ -560,17 +567,27 @@ const ask = (message) => new Promise((resolve) => {
 function askAccess(base) {
   let origin;
   try {
-    origin = `${new URL(base).origin}/*`;
+    // ПОРТ В ШАБЛОН ПРАВ НЕ ВХОДИТ. Тот же расчёт, что в `originOf`
+    // (name-llm.js); повторён здесь, потому что спрашивать разрешение можно
+    // только пока жив клик человека, а импорт модуля фона это ожидание.
+    const url = new URL(base);
+    if ((url.protocol !== 'http:' && url.protocol !== 'https:') || !url.hostname) throw new Error('не адрес');
+    origin = `${url.protocol}//${url.hostname}/*`;
   } catch (e) {
-    return Promise.resolve(false);
+    return Promise.resolve({ granted: false, why: `адрес «${base}» не разбирается` });
   }
   return new Promise((resolve) => {
     try {
       chrome.permissions.request({ origins: [origin] }, (granted) => {
-        resolve(chrome.runtime.lastError ? false : !!granted);
+        // Отказ Chrome и отказ человека — разные вещи, и чинят их по-разному.
+        // Молчаливое false заставляло искать причину везде, кроме того места,
+        // где она есть.
+        const failure = chrome.runtime.lastError;
+        if (failure) resolve({ granted: false, why: `Chrome отклонил ${origin}: ${failure.message}` });
+        else resolve({ granted: !!granted, why: granted ? null : `вы не дали доступ к ${origin}` });
       });
     } catch (err) {
-      resolve(false);
+      resolve({ granted: false, why: `Chrome отклонил ${origin}: ${err && err.message}` });
     }
   });
 }
@@ -701,10 +718,10 @@ for (const control of [np.mode, np.model, np.batch, np.key]) {
 }
 
 np.probe.addEventListener('click', async () => {
-  const granted = await askAccess(currentBase());
+  const access = await askAccess(currentBase());
   np.state.textContent = 'Проверяю…';
   await saveNames();
-  if (!granted) { np.state.textContent = 'Без разрешения на адрес модели проверить нечем'; return; }
+  if (!access.granted) { np.state.textContent = `Проверить нечем: ${access.why}`; return; }
   const answer = await ask({ type: 'ucore:names-probe' });
   if (!answer.ok) { np.state.textContent = answer.error || 'не получилось'; return; }
   const list = answer.models.slice(0, 12).join(', ') || 'ни одной модели';
@@ -714,9 +731,9 @@ np.probe.addEventListener('click', async () => {
 });
 
 async function startNames(all) {
-  const granted = await askAccess(currentBase());
+  const access = await askAccess(currentBase());
   await saveNames();
-  if (!granted) { np.state.textContent = 'Нужно разрешение на адрес модели'; return; }
+  if (!access.granted) { np.state.textContent = `Перевод не начат: ${access.why}`; return; }
   const answer = await ask({ type: 'ucore:names-run', all });
   if (!answer.ok) np.state.textContent = answer.reason || 'не удалось начать';
   refreshNames();

@@ -148,9 +148,27 @@ export async function writeKey(key) {
   return { ok: true, hasKey: !!value };
 }
 
+/**
+ * Адрес сервиса -> шаблон, которым Chrome спрашивает разрешение.
+ *
+ * ПОРТ ОТСЮДА УБИРАЕТСЯ. В шаблонах прав Chrome порта нет вовсе: в манифесте
+ * стоит `http://localhost/*`, и оно покрывает любой порт. А `new URL(base)
+ * .origin` порт как раз возвращает — у местной модели адрес
+ * `http://localhost:11434/v1`, и получалось `http://localhost:11434/*`.
+ * Такого шаблона в манифесте нет, поэтому право не запрашивалось никогда:
+ * перевод на своей модели просто не включался, и человеку об этом говорили
+ * «нужно разрешение на адрес модели» — то есть ровно то, что он и пытался
+ * дать.
+ */
 export function originOf(base) {
   try {
-    return `${new URL(base).origin}/*`;
+    const url = new URL(base);
+    // `new URL('localhost:11434')` разбирается без ошибки: протокол
+    // «localhost:», хоста нет — и наружу уходило `localhost:///*`. Chrome
+    // такой шаблон не примет, а человеку скажут невнятное. Проверяем здесь.
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+    if (!url.hostname) return null;
+    return `${url.protocol}//${url.hostname}/*`;
   } catch (e) {
     return null;
   }
