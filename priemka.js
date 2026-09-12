@@ -447,7 +447,14 @@ function finish() {
 // ------------------------------------------------------------------
 
 function exportCsv() {
-  const head = ['Ячейка', 'Заказ', 'PID', 'ШК товара', 'Товар', 'Единица', 'Габариты мм',
+  // «Оригинал WMS» — название ровно то, что отдал WMS, без сокращения.
+  //
+  // Без него выгрузку нельзя замерить: в колонке «Товар» лежит УЖЕ
+  // сокращённое название, и прогон его через алгоритм второй раз меряет не
+  // алгоритм, а самого себя. Полезно и оператору: если короткое название
+  // непонятно, рядом в той же строке стоит полное.
+  const head = ['Ячейка', 'Заказ', 'PID', 'ШК товара', 'Товар', 'Оригинал WMS',
+                'Единица', 'Габариты мм',
                 'Клиент', 'Телефон', 'ГМ', 'Источник', 'Партнёр', 'Номер WMS'];
   const esc = (v) => {
     const t = v === null || v === undefined ? '' : String(v);
@@ -457,7 +464,7 @@ function exportCsv() {
   for (const r of filtered()) {
     const sku = skuOf(r) || {};
     lines.push([
-      r.cell, r.orderId || r.orderBarcode, r.pid, r.barcode, nameOf(r), sku.unit,
+      r.cell, r.orderId || r.orderBarcode, r.pid, r.barcode, nameOf(r), fullNameOf(r), sku.unit,
       sku.length ? `${sku.length}x${sku.width}x${sku.height}` : '',
       r.clientName, r.phone, r.gm, SRC[r.source] || r.source, r.partner, r.wmsOrderId
     ].map(esc).join(';'));

@@ -50,10 +50,20 @@ function load(file) {
   const lines = raw.split(/\r?\n/).filter(l => l.trim());
   const head = splitCsvLine(lines[0]);
   const at = (title) => head.indexOf(title);
-  const iName = at('Товар');
+  // ОРИГИНАЛ, А НЕ СОКРАЩЁННОЕ. В колонке «Товар» лежит то, что уже показано
+  // на полке, — прогон его через алгоритм второй раз меряет не алгоритм, а
+  // самого себя. Старые выгрузки этой колонки не имеют; тогда меряем по
+  // «Товару» и говорим об этом прямо.
+  const iOrig = at('Оригинал WMS');
+  const iName = iOrig >= 0 ? iOrig : at('Товар');
   const iUnit = at('Единица');
   const iDim = at('Габариты мм');
-  if (iName < 0) throw new Error('в файле нет колонки «Товар»');
+  if (iName < 0) throw new Error('в файле нет ни «Оригинал WMS», ни «Товар»');
+  if (iOrig < 0) {
+    console.log('ВНИМАНИЕ: в выгрузке нет колонки «Оригинал WMS» — меряем по');
+    console.log('колонке «Товар», где названия УЖЕ сокращены. Доля срезанных');
+    console.log('и средняя длина будут занижены. Выгрузите заново.\n');
+  }
   const seen = new Map();
   for (const line of lines.slice(1)) {
     const cells = splitCsvLine(line);

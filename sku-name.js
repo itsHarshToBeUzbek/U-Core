@@ -293,6 +293,12 @@
     return out;
   }
 
+  /** Есть ли ЭТО количество уже в тексте — по значению и единице, не по строке. */
+  function hasQuantity(text, q) {
+    if (!q) return false;
+    return quantities(text).some(x => x.value === q.value && x.unit === q.unit);
+  }
+
   /**
    * Одно количество — то, которое стоит показать человеку.
    *
@@ -379,13 +385,46 @@
    * список товаров.
    */
   function bracketAttrs(name) {
+    const source = String(name || '');
     const out = [];
-    for (const group of String(name || '').match(/\(([^)]*)\)/g) || []) {
-      const inner = group.slice(1, -1);
-      for (const part of inner.split(',')) {
-        const at = part.indexOf(':');
+
+    // СКОБКИ БЫВАЮТ ВЛОЖЕННЫЕ, и регулярное выражение на них ломается.
+    // `(O'lcham : S (kichkina))` по шаблону `\(([^)]*)\)` обрывается на
+    // первой закрывающей: значением становилось «S (kichkina» — обрывок с
+    // незакрытой скобкой, и он так и уезжал на полку. На выгрузке ТАШ-120
+    // таких названий 13 из 617. Поэтому группы ищем счётчиком глубины.
+    for (let i = 0; i < source.length; i++) {
+      if (source[i] !== '(') continue;
+      let depth = 0;
+      let end = -1;
+      for (let j = i; j < source.length; j++) {
+        if (source[j] === '(') depth++;
+        else if (source[j] === ')') {
+          depth--;
+          if (depth === 0) { end = j; break; }
+        }
+      }
+      // Скобка не закрыта до конца строки — берём остаток.
+      const inner = source.slice(i + 1, end < 0 ? source.length : end);
+      i = end < 0 ? source.length : end;
+
+      // Запятые ВНУТРИ вложенной скобки не разделяют атрибуты:
+      // «Ikki kishilik to'plam (2-спальный, 180x200)» — это одно значение.
+      let depth2 = 0;
+      let part = '';
+      const parts = [];
+      for (const ch of inner) {
+        if (ch === '(') depth2++;
+        else if (ch === ')') depth2--;
+        if (ch === ',' && depth2 <= 0) { parts.push(part); part = ''; continue; }
+        part += ch;
+      }
+      parts.push(part);
+
+      for (const piece of parts) {
+        const at = piece.indexOf(':');
         if (at < 0) continue;
-        const value = part.slice(at + 1).trim();
+        const value = piece.slice(at + 1).trim();
         if (value) out.push(value);
       }
     }
@@ -454,8 +493,11 @@
     // Уже по-русски — переводить нечего.
     if (isRussian(source)) {
       const q = quantity(source);
-      const parts = [trimRussian(source)];
-      if (q) parts.push(q.text);
+      const trimmed = trimRussian(source);
+      const parts = [trimmed];
+      // «АЛЬБОМ для рисования 12л А4ф …, 12 л» — количество уже сказано в
+      // самой строке, и второй раз его писать незачем.
+      if (q && !hasQuantity(trimmed, q)) parts.push(q.text);
       return { text: parts.join(', '), known: true, russian: true, quantity: q };
     }
 
@@ -472,20 +514,35 @@
       const q = quantity(source);
       const suffix = [];
       const c = color(source, 'm');
+      const core = segment(source);
       for (const value of bracketAttrs(source)) {
         // Цвет уже переведён отдельной строкой — второй раз, да ещё
         // по-узбекски, он не нужен.
         if (c && norm(value) === norm(rawColor(source))) continue;
+        // Атрибут, который ЦЕЛИКОМ повторяет количество из головы:
+        // «Plastik stakan Lolo 500/700 ml …(Hajm: 700 мл)». Выбрасываем
+        // только когда кроме количества в нём ничего нет — «3XL/4XL 50-54
+        // razmer» тоже содержит числа, но говорит куда больше.
+        const inValue = quantities(value);
+        if (inValue.length === 1 && inValue.every(x => hasQuantity(core, x))) {
+          const rest = value.slice(0, inValue[0].at) + value.slice(inValue[0].end);
+          if (rest.replace(/[^a-zа-яё0-9]/gi, '').length <= 2) continue;
+        }
         suffix.push(value);
       }
-      const core = segment(source);
-      // Количество приписываем, только если его нет в самой голове: «Suv
-      // Hydrolife 1.5 L 6 dona, 1,5 л» — это одно и то же, сказанное дважды.
+      // Количество приписываем, только если его ещё нет в строке — ни в
+      // голове, ни в атрибутах из скобок.
+      //
       // Сравниваем РАЗОБРАННЫЕ количества, а не строки: в голове стоит
       // «1.5 L» латиницей, а q.text уже приведён к «1,5 л» — как строки они
-      // не совпадут никогда, и количество приписалось бы вторым разом.
-      const inCore = quantities(core);
-      const said = q && inCore.some(x => x.value === q.value && x.unit === q.unit);
+      // не совпадут никогда.
+      //
+      // Атрибуты проверять обязательно: продавцы пишут количество именно
+      // там — «(Hajmi: 100 ml)», «(Miqdor: 5 dona)», «(Og'irlik: 1kg)», — и
+      // на полку уезжало «…, 100 ml, 100 мл». На выгрузке ТАШ-120 таких
+      // названий 25 из 617.
+      const already = quantities([core, ...suffix].join(' , '));
+      const said = q && already.some(x => x.value === q.value && x.unit === q.unit);
       if (q && !said) suffix.push(q.text);
       if (c) suffix.push(c);
 

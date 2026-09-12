@@ -3,7 +3,7 @@
 // Примеры взяты из живого среза ТАШ-120 — те же, что в CHANGELOG 2.15.0.
 // Выдумывать названия для тестов нельзя: словарь по выдуманным и пройдёт.
 
-import { loadClassic, suite, test, eq, ok, no, report } from './harness.mjs';
+import { loadClassic, suite, test, eq, deep, ok, no, report } from './harness.mjs';
 
 loadClassic('sku-name.js');
 const S = globalThis.UCoreSkuName;
@@ -287,6 +287,56 @@ test('перевод чужого названия не подставляетс
   const shown = S.displayName('Bolalar atir sovuni, 140 g',
                               { text: 'Рюкзак школьный', src: 'другое-название', by: 'модель' });
   no(shown.text === 'Рюкзак школьный', 'перевод от другого товара встал на место');
+});
+
+// ------------------------------------------------------------------
+suite('вложенные скобки и повторы — найдено на живой выгрузке 2.17.0');
+
+test('ВЛОЖЕННАЯ СКОБКА НЕ ОБРЫВАЕТ ЗНАЧЕНИЕ', () => {
+  // `\(([^)]*)\)` останавливается на первой закрывающей, и на полку уезжал
+  // обрывок «S (kichkina» с незакрытой скобкой. 13 названий из 617.
+  deep(S.bracketAttrs("(O'lcham : S (kichkina))"), ['S (kichkina)']);
+  deep(S.bracketAttrs('(Rang: Sargʻish melanj, Hajmi: M(42-44))'),
+       ['Sargʻish melanj', 'M(42-44)']);
+});
+
+test('скобки в готовом названии всегда закрыты', () => {
+  for (const name of ["Bir martalik nitril qo'lqoplar, rezina, 100 dona (O'lcham : S (kichkina))",
+                      'Top ayollar uchun, uzun yengli (Rang: Sargʻish melanj, Hajmi: M(42-44))']) {
+    const text = S.shortName(name).text;
+    const open = (text.match(/\(/g) || []).length;
+    const close = (text.match(/\)/g) || []).length;
+    eq(open, close, `скобка не закрыта: «${text}»`);
+  }
+});
+
+test('запятая ВНУТРИ вложенной скобки не делит атрибут', () => {
+  deep(S.bracketAttrs("(O`lcham: Ikki kishilik to'plam (2-спальный, 180x200))"),
+       ["Ikki kishilik to'plam (2-спальный, 180x200)"]);
+});
+
+test('КОЛИЧЕСТВО ИЗ СКОБОК НЕ ПРИПИСЫВАЕТСЯ ВТОРЫМ РАЗОМ', () => {
+  // Продавцы пишут количество в атрибутах, и на полку уезжало
+  // «…, 100 ml, 100 мл». 25 названий из 617.
+  const text = S.shortName('Namlantiruvchi mist Anua Capsule Mist, 100 ml (Hajmi: 100 ml)').text;
+  eq((text.match(/100/g) || []).length, 1, `сто сказано дважды: «${text}»`);
+});
+
+test('атрибут, который целиком повторяет количество головы, выбрасывается', () => {
+  const text = S.shortName('Plastik stakan Lolo 500/700 ml qopqoqli stakan (Rang: Shaffof, Hajm: 700 мл)').text;
+  eq((text.match(/700/g) || []).length, 1, `семьсот сказано дважды: «${text}»`);
+  ok(text.includes('прозрачный'), `цвет потерян: «${text}»`);
+});
+
+test('атрибут, который говорит БОЛЬШЕ количества, остаётся', () => {
+  // «3XL/4XL 50-54 razmer» тоже содержит числа, но это не количество.
+  const text = S.shortName("Erkaklar ikki qismli to'plami (Hajmi: 3XL/4XL 50-54 razmer, Rang: Qora)").text;
+  ok(text.includes('3XL/4XL'), `размер выброшен: «${text}»`);
+});
+
+test('русское название не повторяет своё количество', () => {
+  const text = S.shortName('АЛЬБОМ для рисования 12л А4ф на скобе серия -Ассорти- 12А4C, 12 л').text;
+  eq((text.match(/12 ?л/g) || []).length, 1, `двенадцать литров сказано дважды: «${text}»`);
 });
 
 process.exit(report('Словарь названий'));
