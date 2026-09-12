@@ -5,3 +5,4 @@ dist/
 # Локальный мусор
 .DS_Store
 node_modules/
+.test-profile/

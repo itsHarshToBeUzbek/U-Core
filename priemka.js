@@ -564,6 +564,7 @@ function askAccess(base) {
     // (name-llm.js); повторён здесь, потому что спрашивать разрешение можно
     // только пока жив клик человека, а импорт модуля фона это ожидание.
     const url = new URL(base);
+    if ((url.protocol !== 'http:' && url.protocol !== 'https:') || !url.hostname) throw new Error('не адрес');
     origin = `${url.protocol}//${url.hostname}/*`;
   } catch (e) {
     return Promise.resolve({ granted: false, why: `адрес «${base}» не разбирается` });

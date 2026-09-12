@@ -163,6 +163,11 @@ export async function writeKey(key) {
 export function originOf(base) {
   try {
     const url = new URL(base);
+    // `new URL('localhost:11434')` разбирается без ошибки: протокол
+    // «localhost:», хоста нет — и наружу уходило `localhost:///*`. Chrome
+    // такой шаблон не примет, а человеку скажут невнятное. Проверяем здесь.
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+    if (!url.hostname) return null;
     return `${url.protocol}//${url.hostname}/*`;
   } catch (e) {
     return null;
