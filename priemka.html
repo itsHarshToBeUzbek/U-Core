@@ -145,54 +145,6 @@
   }
   .note[data-on="1"] { display: block; }
 
-  /* ---------- панель настроек названий ---------- */
-  /* Отдельный блок, а не диалог: перевод идёт минутами, и оператор в это
-     время смотрит на список. Диалог пришлось бы закрыть и потерять ход. */
-  .panel {
-    margin: 14px 20px 0; padding: 16px 18px; background: var(--paper);
-    border: 1px solid var(--line); border-radius: 16px;
-  }
-  .panel[hidden] { display: none; }
-  .panel__head { display: flex; align-items: center; gap: 12px; }
-  .panel__head h2 { margin: 0; font-size: 15px; font-weight: 800; }
-  .panel__head .btn { margin-left: auto; }
-  .panel__lead { margin: 8px 0 14px; color: var(--ink-soft); max-width: 74ch; }
-  .panel__grid {
-    display: grid; gap: 12px 18px;
-    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-  }
-  .panel__grid label {
-    display: flex; flex-direction: column; gap: 5px;
-    font-size: 12px; font-weight: 700; color: var(--ink-faint);
-    text-transform: uppercase; letter-spacing: .04em;
-  }
-  .panel__grid input, .panel__grid select {
-    font-family: var(--font); font-size: 14px; font-weight: 400;
-    color: var(--ink); background: var(--ground);
-    border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px;
-    text-transform: none; letter-spacing: 0;
-  }
-  .panel__grid input[type="password"] { font-family: var(--font-mono); letter-spacing: .08em; }
-  .panel__hint { font-size: 12px; font-weight: 400; text-transform: none;
-                 letter-spacing: 0; color: var(--ink-faint); }
-  .panel__row {
-    display: flex; align-items: center; gap: 12px;
-    flex-wrap: wrap; margin-top: 16px;
-  }
-  .panel__row .muted { font-size: 13px; }
-  .panel__log {
-    margin-top: 12px; font-size: 13px; color: var(--ink-soft);
-    max-height: 190px; overflow: auto;
-  }
-  .panel__log:empty { display: none; }
-  .panel__log b { color: var(--ink); font-weight: 700; }
-  .panel__log div { padding: 3px 0; border-top: 1px solid var(--line); }
-  .panel__log div:first-child { border-top: none; }
-  .panel__bar {
-    height: 6px; border-radius: 999px; background: var(--line);
-    overflow: hidden; flex: 1 1 140px; min-width: 120px;
-  }
-  .panel__bar i { display: block; height: 100%; background: var(--brand); }
   .foot { padding: 14px 20px 0; font-size: 12px; color: var(--ink-faint); }
 </style>
 </head>
@@ -208,7 +160,6 @@
     <button id="btn-sound" class="btn" aria-pressed="true">🔊 Звук</button>
     <button id="btn-sync" class="btn">Обновить данные</button>
     <button id="btn-export" class="btn">Выгрузить CSV</button>
-    <button id="btn-names" class="btn">Названия…</button>
     <button id="btn-inv" class="btn">Инвентаризация →</button>
   </div>
 
@@ -240,54 +191,6 @@
 </header>
 
 <div class="note" id="note"></div>
-
-<section class="panel" id="names-panel" hidden>
-  <div class="panel__head">
-    <h2>Названия товаров</h2>
-    <button class="btn" id="names-close">Свернуть</button>
-  </div>
-  <p class="panel__lead">
-    WMS отдаёт название так, как его завёл продавец: по-узбекски и со всеми
-    словами для поиска на витрине. В расширении есть словарь на 62 главных
-    слова — знакомое он переводит сам, но список того, что может приехать,
-    не закончится никогда. Остальное может перевести языковая модель.
-    Наружу при этом уходит <b>только название товара</b> — то, которое и так
-    открыто на витрине Uzum. Ни клиентов, ни телефонов, ни номеров заказов.
-    Каждый товар переводится один раз и запоминается; весь справочник — это
-    около двадцати запросов и пара центов.
-  </p>
-  <div class="panel__grid">
-    <label>Перевод
-      <select id="names-mode">
-        <option value="rules">Только словарь</option>
-        <option value="llm">Словарь и модель</option>
-      </select>
-    </label>
-    <label>Сервис
-      <select id="names-provider"></select>
-    </label>
-    <label>Модель
-      <input id="names-model" type="text" spellcheck="false">
-    </label>
-    <label>Ключ
-      <input id="names-key" type="password" spellcheck="false" autocomplete="off"
-             placeholder="вставьте свой ключ">
-      <span class="panel__hint" id="names-keys-where"></span>
-    </label>
-    <label>Названий в запросе
-      <input id="names-batch" type="number" min="1" max="50" step="1">
-    </label>
-  </div>
-  <div class="panel__row">
-    <button class="btn" id="names-probe">Проверить связь</button>
-    <button class="big-action" id="names-run">Перевести названия</button>
-    <button class="btn" id="names-again" hidden>Перевести всё заново</button>
-    <button class="btn" id="names-stop" hidden>Остановить</button>
-    <div class="panel__bar" id="names-bar" hidden><i style="width:0"></i></div>
-    <span id="names-state" class="muted"></span>
-  </div>
-  <div class="panel__log" id="names-log"></div>
-</section>
 
 <div class="run" id="run">
   <div class="run__cell" id="run-cell">—</div>
@@ -324,7 +227,6 @@
 </main>
 
 <script src="wms-parse.js"></script>
-  <script src="sku-name.js"></script>
 <script src="priemka.js" type="module"></script>
 </body>
 </html>

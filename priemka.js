@@ -20,14 +20,12 @@ import { sizeTierFromDimensions } from './allocation-core.js';
 
 const parser = () => globalThis.UCoreWmsParse;
 
-const KEYS = ['priemkaRecords', 'priemkaCells', 'priemkaSku', 'priemkaMissingCells',
-              'priemkaSync', 'skuNameCache'];
+const KEYS = ['priemkaRecords', 'priemkaCells', 'priemkaSku', 'priemkaMissingCells', 'priemkaSync'];
 
 const state = {
   records: [],
   cells: [],
   sku: {},
-  names: {},          // готовые переводы: штрихкод -> { text, src, by }
   missing: new Set(),
   queue: [],          // позиции режима приёмки
   at: -1,             // текущий индекс в очереди
@@ -114,27 +112,11 @@ function fullNameOf(record) {
   return (sku && (sku.name || sku.title)) || '';
 }
 
-/**
- * Короткое русское название; оригинал остаётся в подсказке и в поиске.
- *
- * Источников два, и порядок между ними один: сохранённый перевод модели, а
- * если его нет или он про другое название — словарь. Решение принимает
- * displayName в sku-name.js, чтобы список и попап не разошлись во мнениях.
- */
-function nameOf(record) {
-  const full = fullNameOf(record);
-  if (!full) return '';
-  const lib = globalThis.UCoreSkuName;
-  if (!lib) return full;
-  return lib.displayName(full, state.names[record.barcode]).text || full;
-}
-
 function load() {
   chrome.storage.local.get(KEYS, (data) => {
     state.records = data.priemkaRecords || [];
     state.cells = (data.priemkaCells || []).map(String);
     state.sku = data.priemkaSku || {};
-    state.names = data.skuNameCache || {};
     state.missing = new Set((data.priemkaMissingCells || []).map(String));
     render();
   });
@@ -150,7 +132,7 @@ function filtered() {
       const key = r.partner ? `partner:${r.partner}` : (r.source || 'unknown');
       if (key !== src) return false;
     }
-    const named = !!nameOf(r);
+    const named = !!fullNameOf(r);
     // «БЕЗ ЯЧЕЙКИ» — ЭТО ПРО ПОЛКУ, А НЕ ПРО КОРОБА.
     //
     // Счётчик сверху всегда считал только полку, а фильтр — нет: в список
@@ -169,7 +151,7 @@ function filtered() {
     // Ищем и по короткому названию, и по оригиналу: оператор набирает то
     // «мыло», то «sovun» — смотря что у него перед глазами.
     return [r.cell, r.orderId, r.orderBarcode, r.pid, r.barcode, r.gm, r.clientName,
-            r.phone, nameOf(r), fullNameOf(r), r.partner]
+            r.phone, fullNameOf(r), r.partner]
       .some((v) => v && String(v).toLowerCase().includes(q));
   });
 }
@@ -234,13 +216,9 @@ function render() {
     const sku = skuOf(r);
     const nameTd = document.createElement('td');
     nameTd.className = 'c-name';
-    const name = nameOf(r);
-    const fullName = fullNameOf(r);
+    const name = fullNameOf(r);
     if (name) {
       nameTd.textContent = name;
-      // Оригинал WMS — по наведению: он длинный и по-узбекски, но именно он
-      // написан на коробке, и иногда сверять надо именно с ним.
-      if (fullName && fullName !== name) nameTd.title = fullName;
       if (sku && sku.needsIdentifier) {
         const f = document.createElement('span');
         f.className = 'flag'; f.textContent = 'IMEI';
@@ -251,12 +229,7 @@ function render() {
         const small = document.createElement('small');
         const dims = sku.length ? `${sku.length}×${sku.width}×${sku.height} мм` : '';
         const tier = sizeTierFromDimensions(sku);
-        // ВЕС WMS НЕ ОТДАЁТ. Заявленный в названии берём как есть, остальное
-        // считаем по объёму — и помечаем тильдой, чтобы оценку не приняли
-        // за факт.
-        const lib = globalThis.UCoreSkuName;
-        const weight = lib ? lib.weightText(lib.weightKg(sku, fullName)) : '';
-        small.textContent = [sku.unit, dims, tier, weight].filter(Boolean).join(' · ');
+        small.textContent = [sku.unit, dims, tier].filter(Boolean).join(' · ');
         nameTd.appendChild(small);
       }
     } else {
@@ -311,7 +284,7 @@ function render() {
   const gone = state.records.filter((r) => r.gone);
   const incoming = state.records.filter((r) => r.source === 'cargo');
   const withCell = shelf.filter((r) => r.cell).length;
-  const named = state.records.filter((r) => nameOf(r)).length;
+  const named = state.records.filter((r) => fullNameOf(r)).length;
   ui.sTotal.textContent = shelf.length;
   ui.sCell.textContent = withCell;
   ui.sNoCell.textContent = shelf.length - withCell;
@@ -343,7 +316,7 @@ function render() {
   }
 
   // ---------- подсказки ----------
-  const noName = state.records.filter((r) => r.barcode && !nameOf(r)).length;
+  const noName = state.records.filter((r) => r.barcode && !fullNameOf(r)).length;
   const missingCount = state.missing.size;
   const bits = [];
   if (noName) bits.push(`${noName} позиций без названия — справочник товаров подтянется при следующем сборе`);
@@ -400,7 +373,7 @@ function showCurrent() {
   const r = state.queue[state.at];
   if (!r) return finish();
   ui.runCell.textContent = r.cell;
-  ui.runName.textContent = nameOf(r) || globalThis.UCoreWmsParse.typeLabel(r) || 'Без названия';
+  ui.runName.textContent = fullNameOf(r) || globalThis.UCoreWmsParse.typeLabel(r) || 'Без названия';
   ui.runSub.textContent = [r.barcode, r.orderId, r.pid, r.clientName].filter(Boolean).join(' · ');
   ui.runCount.textContent = `${state.at + 1} из ${state.queue.length}`;
   announce(r.cell);
@@ -457,7 +430,7 @@ function exportCsv() {
   for (const r of filtered()) {
     const sku = skuOf(r) || {};
     lines.push([
-      r.cell, r.orderId || r.orderBarcode, r.pid, r.barcode, nameOf(r), sku.unit,
+      r.cell, r.orderId || r.orderBarcode, r.pid, r.barcode, fullNameOf(r), sku.unit,
       sku.length ? `${sku.length}x${sku.width}x${sku.height}` : '',
       r.clientName, r.phone, r.gm, SRC[r.source] || r.source, r.partner, r.wmsOrderId
     ].map(esc).join(';'));
@@ -519,215 +492,5 @@ document.addEventListener('keydown', (event) => {
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'local' && KEYS.some((k) => k in changes)) load();
 });
-
-// ------------------------------------------------------------------
-// Панель «Названия товаров»
-// ------------------------------------------------------------------
-// Настройки перевода и его ход. Сама работа идёт в service worker: попап
-// можно закрыть, вкладку переключить, а перевод продолжится. Отсюда мы
-// только показываем, что происходит, и просим у Chrome право на адрес
-// модели — его нельзя запросить из фонового кода, только из окна и только
-// по клику человека.
-//
-// КЛЮЧ. Поле ключа никогда не заполняется из хранилища: прочитать его
-// обратно панель не может и не должна. Пустое поле значит «не меняем», а
-// введён ли ключ вообще — видно по строке состояния.
-
-const np = {
-  panel: el('names-panel'), open: el('btn-names'), close: el('names-close'),
-  mode: el('names-mode'), provider: el('names-provider'), model: el('names-model'),
-  key: el('names-key'), keysWhere: el('names-keys-where'), batch: el('names-batch'),
-  probe: el('names-probe'), run: el('names-run'), again: el('names-again'),
-  stop: el('names-stop'), bar: el('names-bar'), state: el('names-state'), log: el('names-log')
-};
-
-let namesTimer = null;
-let providers = {};
-
-const ask = (message) => new Promise((resolve) => {
-  chrome.runtime.sendMessage(message, (answer) => {
-    if (chrome.runtime.lastError) resolve({ ok: false, reason: chrome.runtime.lastError.message });
-    else resolve(answer || {});
-  });
-});
-
-/**
- * Право ходить на адрес модели. Запрашиваем ПЕРВЫМ ДЕЙСТВИЕМ обработчика
- * клика и без предварительных проверок: Chrome разрешает спрашивать только
- * пока «жив» клик человека, и любое ожидание перед этим его тратит. Если
- * право уже есть, окно не появляется.
- */
-function askAccess(base) {
-  let origin;
-  try {
-    origin = `${new URL(base).origin}/*`;
-  } catch (e) {
-    return Promise.resolve(false);
-  }
-  return new Promise((resolve) => {
-    try {
-      chrome.permissions.request({ origins: [origin] }, (granted) => {
-        resolve(chrome.runtime.lastError ? false : !!granted);
-      });
-    } catch (err) {
-      resolve(false);
-    }
-  });
-}
-
-function currentBase() {
-  const chosen = providers[np.provider.value];
-  return chosen ? chosen.base : '';
-}
-
-function namesPatchFromForm() {
-  const chosen = providers[np.provider.value] || {};
-  return {
-    enabled: np.mode.value === 'llm',
-    provider: np.provider.value,
-    base: chosen.base,
-    model: np.model.value.trim() || chosen.model,
-    batch: Math.max(1, Math.min(50, Number(np.batch.value) || 25))
-  };
-}
-
-/** Сохранить настройки. Ключ уходит отдельным полем и только если введён. */
-async function saveNames() {
-  const patch = namesPatchFromForm();
-  const message = { type: 'ucore:names-settings', patch };
-  if (np.key.value) {
-    message.key = np.key.value;
-    np.key.value = '';                 // в поле его больше не держим
-  }
-  return ask(message);
-}
-
-function fillProviders(list, chosen) {
-  if (np.provider.options.length && np.provider.dataset.filled === '1') return;
-  np.provider.textContent = '';
-  for (const [id, info] of Object.entries(list)) {
-    const option = document.createElement('option');
-    option.value = id;
-    option.textContent = info.title;
-    np.provider.appendChild(option);
-  }
-  np.provider.dataset.filled = '1';
-  np.provider.value = chosen;
-}
-
-function showNamesStatus(status) {
-  if (!status || !status.settings) return;
-  const s = status.settings;
-  providers = status.providers || providers;
-  fillProviders(providers, s.provider);
-  np.provider.value = s.provider;
-  np.mode.value = s.enabled ? 'llm' : 'rules';
-  if (document.activeElement !== np.model) np.model.value = s.model;
-  if (document.activeElement !== np.batch) np.batch.value = s.batch;
-
-  const where = (providers[s.provider] || {}).keys;
-  np.keysWhere.textContent = where ? `взять на ${where}` : 'местной модели ключ не нужен';
-  np.key.placeholder = status.hasKey ? 'ключ введён — оставьте пустым' : 'вставьте свой ключ';
-
-  const run = status.run || {};
-  const running = !!run.running;
-  np.stop.hidden = !running;
-  np.run.disabled = running || !s.enabled;
-  np.again.hidden = !status.cached;
-  np.again.disabled = running || !s.enabled;
-  np.bar.hidden = !running;
-  if (running && run.total) {
-    np.bar.firstElementChild.style.width = `${Math.round(100 * run.done / run.total)}%`;
-  }
-
-  const parts = [];
-  // Про испорченный ключ говорим первым делом и своими словами: это
-  // единственная ошибка, которую человек исправляет сам и за десять секунд.
-  if (status.keyProblem) parts.push(`Ключ не сохранён: ${status.keyProblem}`);
-  if (running) parts.push(`Перевожу: ${run.done} из ${run.total}`);
-  else if (run.error) parts.push(`Остановилось: ${run.error}`);
-  else if (run.finished && run.total) {
-    parts.push(`Готово: ${run.ok} из ${run.total} за ${run.requests} запросов`);
-  }
-  parts.push(`переведено и сохранено ${status.cached}`);
-  if (status.pending) parts.push(`ждут перевода ${status.pending}`);
-  if (s.enabled && !status.granted) parts.push('нет разрешения на адрес модели');
-  if (s.enabled && status.granted && !status.hasKey && where) parts.push('не введён ключ');
-  np.state.textContent = parts.join(' · ');
-
-  // Отклонённые ответы показываем как есть. Оператору они не нужны, а тому,
-  // кто выбирает модель, нужны только они: по строкам «придумано число» и
-  // «ответ не про этот товар» видно, что именно идёт не так.
-  const bad = (run.rejected || []).slice(0, 8);
-  np.log.textContent = '';
-  if (!running && bad.length) {
-    const head = document.createElement('div');
-    head.innerHTML = '<b>Что модель ответила не так</b>';
-    np.log.appendChild(head);
-    for (const item of bad) {
-      const row = document.createElement('div');
-      row.textContent = `${item.name} → «${item.answer}» — ${item.why}`;
-      np.log.appendChild(row);
-    }
-  }
-}
-
-async function refreshNames() {
-  const status = await ask({ type: 'ucore:names-status' });
-  showNamesStatus(status);
-  clearTimeout(namesTimer);
-  const running = !!(status && status.run && status.run.running);
-  if (running && !np.panel.hidden) namesTimer = setTimeout(refreshNames, 1200);
-  return status;
-}
-
-np.open.addEventListener('click', () => {
-  np.panel.hidden = !np.panel.hidden;
-  if (!np.panel.hidden) refreshNames();
-});
-np.close.addEventListener('click', () => { np.panel.hidden = true; clearTimeout(namesTimer); });
-
-np.provider.addEventListener('change', async () => {
-  const chosen = providers[np.provider.value] || {};
-  np.model.value = chosen.model || '';
-  showNamesStatus(await saveNames());
-});
-for (const control of [np.mode, np.model, np.batch, np.key]) {
-  control.addEventListener('change', async () => {
-    const enabling = np.mode.value === 'llm';
-    if (enabling) await askAccess(currentBase());
-    showNamesStatus(await saveNames());
-  });
-}
-
-np.probe.addEventListener('click', async () => {
-  const granted = await askAccess(currentBase());
-  np.state.textContent = 'Проверяю…';
-  await saveNames();
-  if (!granted) { np.state.textContent = 'Без разрешения на адрес модели проверить нечем'; return; }
-  const answer = await ask({ type: 'ucore:names-probe' });
-  if (!answer.ok) { np.state.textContent = answer.error || 'не получилось'; return; }
-  const list = answer.models.slice(0, 12).join(', ') || 'ни одной модели';
-  np.state.textContent = answer.hasModel
-    ? `Связь есть, модель на месте. Доступны: ${list}`
-    : `Связь есть, но «${np.model.value}» в списке нет. Доступны: ${list}`;
-});
-
-async function startNames(all) {
-  const granted = await askAccess(currentBase());
-  await saveNames();
-  if (!granted) { np.state.textContent = 'Нужно разрешение на адрес модели'; return; }
-  const answer = await ask({ type: 'ucore:names-run', all });
-  if (!answer.ok) np.state.textContent = answer.reason || 'не удалось начать';
-  refreshNames();
-}
-
-np.run.addEventListener('click', () => startNames(false));
-np.again.addEventListener('click', () => startNames(true));
-np.stop.addEventListener('click', async () => {
-  await ask({ type: 'ucore:names-stop' });
-  refreshNames();
-});
-
 
 load();

@@ -389,25 +389,9 @@ function fullNameOf(record) {
   return (sku && (sku.name || sku.title)) || '';
 }
 
-/**
- * Название для полки: короткое, по-русски, с количеством и цветом.
- * Оператор держит коробку и ищет строку глазами — читать семьдесят пять
- * знаков по-узбекски он в этот момент не станет.
- */
-function nameOf(record) {
-  const full = fullNameOf(record);
-  if (!full) return '';
-  const lib = globalThis.UCoreSkuName;
-  if (!lib) return full;
-  return lib.shortName(full).text || full;
-}
-
 function nameByBarcode(code) {
   const sku = state.sku[code];
-  const full = (sku && (sku.name || sku.title)) || '';
-  if (!full) return '';
-  const lib = globalThis.UCoreSkuName;
-  return lib ? (lib.shortName(full).text || full) : full;
+  return (sku && (sku.name || sku.title)) || '';
 }
 
 // ------------------------------------------------------------------
@@ -473,7 +457,7 @@ function renderCells() {
     if (!query) return true;
     if (cellId.includes(query)) return true;
     return (state.byCell.get(cellId) || []).some(r =>
-      [nameOf(r), r.clientName, r.barcode, r.orderId, r.orderBarcode, r.pid]
+      [fullNameOf(r), r.clientName, r.barcode, r.orderId, r.orderBarcode, r.pid]
         .filter(Boolean).join(' ').toLowerCase().includes(query));
   });
 
@@ -807,7 +791,7 @@ function groupSame(records) {
     // разным содержимым; слить их в «1 из 2» значит показать оператору
     // состав чужой коробки.
     const id = [r.orderId || r.orderBarcode || '', r.wmsOrderId || '',
-                r.barcode || nameOf(r) || ''].join('|');
+                r.barcode || fullNameOf(r) || ''].join('|');
     if (!by.has(id)) by.set(id, []);
     by.get(id).push(r);
   }
@@ -1103,7 +1087,7 @@ function handleScan(raw) {
       saveSession();
       const total = matches.length;
       const done = matches.filter(r => session.found.includes(keyOf(r))).length;
-      flash('ok', `✓ ${nameOf(hit) || code}`
+      flash('ok', `✓ ${fullNameOf(hit) || code}`
         + (total > 1 ? ` — ${done} из ${total}` : '')
         + (hit.clientName ? ` · ${hit.clientName}` : ''));
     }
@@ -1140,12 +1124,12 @@ function handleScan(raw) {
     if (!session.extra.some(e => e.code === code)) {
       session.extra.push({
         code, belongsTo: String(elsewhere.cell),
-        itemName: nameOf(elsewhere) || null, at: Date.now()
+        itemName: fullNameOf(elsewhere) || null, at: Date.now()
       });
       saveSession();
     }
     flash('bad', `${code} лежит не там: числится в ячейке ${elsewhere.cell}`
-      + (nameOf(elsewhere) ? ` (${nameOf(elsewhere)})` : ''));
+      + (fullNameOf(elsewhere) ? ` (${fullNameOf(elsewhere)})` : ''));
     sayCell(elsewhere.cell);
     renderWork(); renderStats(); renderCells();
     return;
@@ -1184,14 +1168,14 @@ function handleScan(raw) {
       if (!s2.found.includes(key)) s2.found.push(key);
       markScanned(key);
       saveSession();
-      flash('ok', `✓ ${nameOf(rec) || code} — новый товар, числится в этой ячейке`);
+      flash('ok', `✓ ${fullNameOf(rec) || code} — новый товар, числится в этой ячейке`);
       load();
       return;
     }
 
     const s2 = cellState(state.activeCell);
     if (!s2.extra.some(e => e.code === code)) {
-      s2.extra.push({ code, belongsTo: cell, itemName: nameOf(rec) || null,
+      s2.extra.push({ code, belongsTo: cell, itemName: fullNameOf(rec) || null,
                       status: rec.status || null, at: Date.now() });
       saveSession();
     }
@@ -1431,7 +1415,7 @@ document.getElementById('btn-export').addEventListener('click', () => {
     for (const key of session.missing || []) {
       const r = byKey.get(key);
       if (!r) continue;
-      rows.push([cellId, 'нет на месте', nameOf(r), r.barcode || '', r.orderId || '', r.clientName || '', '']);
+      rows.push([cellId, 'нет на месте', fullNameOf(r), r.barcode || '', r.orderId || '', r.clientName || '', '']);
     }
     for (const entry of session.extra || []) {
       rows.push([cellId, 'лишнее', entry.itemName || nameByBarcode(entry.code), entry.code, '', '', entry.belongsTo || 'неизвестно']);
@@ -1442,7 +1426,7 @@ document.getElementById('btn-export').addEventListener('click', () => {
   // значит тихо потерять их из инвентаризации — то же самое, что недостача,
   // только незаметная.
   for (const r of state.noCell || []) {
-    rows.push(['—', 'нет ячейки в WMS', nameOf(r), r.barcode || '', r.orderId || '', r.clientName || '', '']);
+    rows.push(['—', 'нет ячейки в WMS', fullNameOf(r), r.barcode || '', r.orderId || '', r.clientName || '', '']);
   }
 
   if (rows.length === 1) {
@@ -1726,7 +1710,7 @@ function blindScan(raw) {
     if (s.found.includes(key)) {
       SOUNDS.warn();
       journal({ code, result: 'повторный скан' });
-      blindShow('warn', 'Уже считан', String(blind.counted), nameOf(hit) || code);
+      blindShow('warn', 'Уже считан', String(blind.counted), fullNameOf(hit) || code);
       blindRevert(900);
       return;
     }
@@ -1734,10 +1718,10 @@ function blindScan(raw) {
     s.missing = s.missing.filter(k => k !== key);
     blind.counted++;
     saveSession();
-    journal({ code, result: 'принято', detail: nameOf(hit) || null });
+    journal({ code, result: 'принято', detail: fullNameOf(hit) || null });
     SOUNDS.ok();
     blindShow('ok', 'Принято', String(blind.counted),
-      `${nameOf(hit) || code}${expected.length ? ` · ${s.found.length} из ${expected.length}` : ''}`);
+      `${fullNameOf(hit) || code}${expected.length ? ` · ${s.found.length} из ${expected.length}` : ''}`);
     blindRevert(700);
     renderCells(); renderStats(); renderWork();
     return;
@@ -1749,7 +1733,7 @@ function blindScan(raw) {
   if (elsewhere) {
     if (!s.extra.some(e => e.code === code)) {
       s.extra.push({ code, belongsTo: String(elsewhere.cell),
-                     itemName: nameOf(elsewhere) || null, at: Date.now() });
+                     itemName: fullNameOf(elsewhere) || null, at: Date.now() });
       saveSession();
     }
     journal({ code, result: 'не та ячейка', detail: `числится в ${elsewhere.cell}` });
@@ -1758,7 +1742,7 @@ function blindScan(raw) {
     // называем вслух, сразу после звука ошибки.
     sayCell(elsewhere.cell);
     blindShow('bad', 'НЕ ТА ЯЧЕЙКА · отнести в', String(elsewhere.cell),
-      nameOf(elsewhere) || code, { lock: true });
+      fullNameOf(elsewhere) || code, { lock: true });
     renderCells(); renderStats(); renderWork();
     return;
   }
@@ -1803,7 +1787,7 @@ function blindScan(raw) {
     // ячейку не теряет. Считать его найденным — прятать недостачу.
     if (!shelf.onShelf) {
       if (!s.extra.some(e => e.code === code)) {
-        s.extra.push({ code, belongsTo: cell, itemName: nameOf(rec) || null,
+        s.extra.push({ code, belongsTo: cell, itemName: fullNameOf(rec) || null,
                        status: rec.status || null, at: Date.now() });
         saveSession();
       }
@@ -1825,14 +1809,14 @@ function blindScan(raw) {
       journal({ code, result: 'принято (живой поиск)', detail: rec.orderId || null });
       SOUNDS.ok();
       blindShow('ok', 'Принято', String(blind.counted),
-        `${nameOf(rec) || code} · этой ячейки`);
+        `${fullNameOf(rec) || code} · этой ячейки`);
       blindRevert(700);
       load();
       return;
     }
 
     if (!s.extra.some(e => e.code === code)) {
-      s.extra.push({ code, belongsTo: cell, itemName: nameOf(rec) || null,
+      s.extra.push({ code, belongsTo: cell, itemName: fullNameOf(rec) || null,
                      status: rec.status || null, at: Date.now() });
       saveSession();
     }
@@ -1840,7 +1824,7 @@ function blindScan(raw) {
     if (cell) {
       journal({ code, result: 'не та ячейка (живой поиск)', detail: `числится в ${cell}` });
       sayCell(cell);
-      blindShow('bad', 'НЕ ТА ЯЧЕЙКА · отнести в', cell, nameOf(rec) || code, { lock: true });
+      blindShow('bad', 'НЕ ТА ЯЧЕЙКА · отнести в', cell, fullNameOf(rec) || code, { lock: true });
     } else {
       journal({ code, result: 'ячейка не назначена', detail: rec.status || null });
       blindShow('bad', 'ЯЧЕЙКА НЕ НАЗНАЧЕНА', '!',

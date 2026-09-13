@@ -32,13 +32,6 @@ import {
   sleep
 } from './wms-api.js';
 
-// Словарь названий. Классический скрипт: он же подключается на страницах
-// расширения тегом <script>, поэтому наружу отдаёт себя через globalThis, а
-// не через export. Импорт нужен ради побочного эффекта — после него
-// globalThis.UCoreSkuName есть и в service worker.
-import './sku-name.js';
-import * as nameLlm from './name-llm.js';
-
 const LOG = '[U-Core sync]';
 
 // Версия формата собранных записей. Меняется, когда меняется НАБОР
@@ -1574,12 +1567,6 @@ async function runSync({ full = false } = {}) {
       ...counters,
       warnings: warnings.length ? warnings : null
     });
-    // НОВЫЕ НАЗВАНИЯ — СРАЗУ В ОЧЕРЕДЬ НА ПЕРЕВОД. Не ждём кнопки: после
-    // поставки в справочнике появилось десять незнакомых товаров, и к тому
-    // моменту, как оператор дойдёт до стеллажа, они уже должны быть
-    // по-русски. Десять названий — это один запрос. Ошибку наружу не
-    // отдаём: сбор данных удался, а перевод сам расскажет о себе в панели.
-    startNameRun().catch(err => console.warn(`${LOG} перевод названий не начался:`, err));
     return { ok: true, ...counters, warnings };
   } catch (err) {
     console.error(`${LOG} ошибка выгрузки:`, err);
@@ -1745,136 +1732,6 @@ async function recommendCell(message) {
   };
 }
 
-// ==========================================
-// ПЕРЕВОД НАЗВАНИЙ
-// ==========================================
-// Здесь только очередь и хранилище: как устроен запрос, почему пачками и
-// чем опасна пачка — в name-llm.js.
-
-let nameRunAbort = null;
-
-/** Товары, у которых нет свежего перевода. Свежий — значит про это же имя. */
-async function pendingNames({ all = false } = {}) {
-  const lib = globalThis.UCoreSkuName;
-  const data = await chrome.storage.local.get(['priemkaSku', nameLlm.CACHE_KEY]);
-  const sku = data.priemkaSku || {};
-  const cache = data[nameLlm.CACHE_KEY] || {};
-  const items = [];
-  // Наружу уходит ТОЛЬКО название из справочника товаров. Записи о полке —
-  // клиент, телефон, заказ, ячейка — в этот список не попадают вовсе, и это
-  // видно прямо здесь: другого источника у items нет.
-  for (const [barcode, row] of Object.entries(sku)) {
-    const name = row && (row.name || row.title);
-    if (!name || String(name).trim().length < 3) continue;
-    const hit = cache[barcode];
-    if (!all && hit && hit.src === lib.srcKey(name)) continue;
-    items.push({ barcode, name: String(name) });
-  }
-  return { items, cache };
-}
-
-async function setNameRun(patch) {
-  const data = await chrome.storage.local.get([nameLlm.RUN_KEY]);
-  const next = { ...(data[nameLlm.RUN_KEY] || {}), ...patch, at: Date.now() };
-  await chrome.storage.local.set({ [nameLlm.RUN_KEY]: next });
-  return next;
-}
-
-async function startNameRun({ all = false } = {}) {
-  if (nameRunAbort) return { ok: false, reason: 'перевод уже идёт' };
-  const lib = globalThis.UCoreSkuName;
-  const settings = await nameLlm.readSettings();
-  if (!settings.enabled) return { ok: false, reason: 'перевод моделью выключен' };
-  if (!(await nameLlm.hasAccess(settings.base))) {
-    return { ok: false, reason: 'нет разрешения на адрес модели', needPermission: true };
-  }
-  const key = await nameLlm.readKey();
-  if (!key && !/^http:\/\/(localhost|127\.0\.0\.1)/.test(settings.base)) {
-    return { ok: false, reason: 'не введён ключ' };
-  }
-
-  const { items, cache } = await pendingNames({ all });
-  if (!items.length) {
-    await setNameRun({ running: false, done: 0, total: 0, ok: 0, failed: 0, finished: true });
-    return { ok: true, total: 0 };
-  }
-
-  nameRunAbort = new AbortController();
-  const signal = nameRunAbort.signal;
-  await setNameRun({ running: true, finished: false, total: items.length,
-                     done: 0, ok: 0, failed: 0, requests: 0, error: null, rejected: [] });
-
-  // Не ждём завершения: перевод справочника идёт минутами, а ответ панели
-  // нужен сейчас. Ход работы панель читает из хранилища.
-  (async () => {
-    let saved = 0;
-    try {
-      const result = await nameLlm.translateAll({
-        items, settings, key, cache, signal,
-        checkTranslation: lib.checkTranslation,
-        srcKey: lib.srcKey,
-        onProgress: async (progress) => {
-          // Сохраняем раз в пачку, а не после каждого названия: пачка и есть
-          // единица работы, которую не хочется терять.
-          if (progress.cache && progress.done > saved) {
-            saved = progress.done;
-            await chrome.storage.local.set({ [nameLlm.CACHE_KEY]: progress.cache });
-          }
-          await setNameRun({
-            running: true, total: progress.total, done: progress.done,
-            ok: progress.ok, failed: progress.failed, requests: progress.requests,
-            note: progress.note || null
-          });
-        }
-      });
-      await chrome.storage.local.set({ [nameLlm.CACHE_KEY]: result.cache });
-      await setNameRun({
-        running: false, finished: true, note: null,
-        total: result.report.total, done: result.report.done,
-        ok: result.report.ok, failed: result.report.failed,
-        requests: result.report.requests,
-        error: result.report.error || null,
-        // Отклонённое видно в панели. По строкам «придумано число» и «ответ
-        // не про этот товар» понятно, что не так с моделью, — по счётчику
-        // «не вышло 80» не понятно ничего.
-        rejected: result.report.rejected
-      });
-    } catch (err) {
-      await setNameRun({ running: false, finished: true, error: String(err && err.message || err) });
-    } finally {
-      nameRunAbort = null;
-    }
-  })();
-
-  return { ok: true, total: items.length };
-}
-
-function stopNameRun() {
-  if (nameRunAbort) nameRunAbort.abort();
-  nameRunAbort = null;
-  return setNameRun({ running: false, stopped: true }).then(() => ({ ok: true }));
-}
-
-/**
- * Что показать панели. Ключ здесь НЕ отдаётся — только признак, что он
- * введён: наружу из service worker он уходит единственным путём, на адрес
- * модели.
- */
-async function nameStatus() {
-  const settings = await nameLlm.readSettings();
-  const data = await chrome.storage.local.get([nameLlm.RUN_KEY, nameLlm.CACHE_KEY]);
-  const { items } = await pendingNames();
-  return {
-    settings,
-    providers: nameLlm.PROVIDERS,
-    hasKey: !!(await nameLlm.readKey()),
-    granted: await nameLlm.hasAccess(settings.base),
-    run: data[nameLlm.RUN_KEY] || null,
-    cached: Object.keys(data[nameLlm.CACHE_KEY] || {}).length,
-    pending: items.length
-  };
-}
-
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || typeof message.type !== 'string') return;
 
@@ -1940,41 +1797,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         });
       }
     })();
-    return true;
-  }
-
-  if (message.type === 'ucore:names-status') {
-    nameStatus().then(sendResponse);
-    return true;
-  }
-  if (message.type === 'ucore:names-settings') {
-    (async () => {
-      // Ключ приходит отдельным полем и в настройки не попадает.
-      let keyProblem = null;
-      if (typeof message.key === 'string') {
-        const saved = await nameLlm.writeKey(message.key);
-        if (!saved.ok) keyProblem = saved.problem;
-      }
-      await nameLlm.writeSettings(message.patch || {});
-      sendResponse({ ...(await nameStatus()), keyProblem });
-    })();
-    return true;
-  }
-  if (message.type === 'ucore:names-probe') {
-    (async () => {
-      const settings = { ...(await nameLlm.readSettings()), ...(message.patch || {}) };
-      sendResponse(await nameLlm.probe(settings, await nameLlm.readKey()));
-    })().catch(err => sendResponse({ ok: false, error: String(err && err.message || err) }));
-    return true;
-  }
-  if (message.type === 'ucore:names-run') {
-    startNameRun({ all: !!message.all })
-      .then(sendResponse)
-      .catch(err => sendResponse({ ok: false, reason: String(err && err.message || err) }));
-    return true;
-  }
-  if (message.type === 'ucore:names-stop') {
-    stopNameRun().then(sendResponse);
     return true;
   }
 

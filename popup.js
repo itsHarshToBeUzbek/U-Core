@@ -1495,15 +1495,13 @@ document.addEventListener('DOMContentLoaded', () => {
 // chrome.storage.local — сам попап в WMS не ходит и ничего там не нажимает.
 
 const PK_RENDER_LIMIT = 300;   // строк за раз: дальше попап начинает тормозить
-const PK_STORAGE_KEYS = ['priemkaRecords', 'priemkaUpdatedAt', 'priemkaCells', 'priemkaSync',
-                         'priemkaSku', 'priemkaMissingCells', 'skuNameCache'];
+const PK_STORAGE_KEYS = ['priemkaRecords', 'priemkaUpdatedAt', 'priemkaCells', 'priemkaSync', 'priemkaSku', 'priemkaMissingCells'];
 
 const pkState = {
   records: [],
   updatedAt: 0,
   cells: [],                    // справочник ячеек, как его отдаёт сам WMS
   sku: {},                      // ШК -> { name, unit, габариты } из WMS
-  names: {},                    // ШК -> готовый перевод названия
   missingCells: [],             // ячейки, которых физически нет (пометил оператор)
   recommendations: new Map(),   // recordKey -> { cellId, reason, tier }
   allocationNote: ''
@@ -1541,29 +1539,6 @@ function pkSkuName(record) {
   const sku = record.barcode ? pkState.sku[record.barcode] : null;
   if (!sku) return '';
   return sku.name || sku.title || '';
-}
-
-/** Сколько это весит: заявленное в названии или оценка по габаритам. */
-function pkWeightKg(record) {
-  const lib = globalThis.UCoreSkuName;
-  if (!lib) return undefined;
-  const sku = record.barcode ? pkState.sku[record.barcode] : null;
-  const weight = lib.weightKg(sku, pkSkuName(record));
-  return weight && weight.kg !== null ? weight.kg : undefined;
-}
-
-/**
- * Название для полки: короткое, по-русски, с количеством и цветом.
- * Оригинал никуда не девается — он уходит в подсказку и в поиск.
- */
-function pkShortName(record) {
-  const full = pkSkuName(record);
-  if (!full) return { text: '', full: '' };
-  const lib = globalThis.UCoreSkuName;
-  if (!lib) return { text: full, full };
-  // Сохранённый перевод модели важнее словаря — см. displayName.
-  const shown = lib.displayName(full, (pkState.names || {})[record.barcode]);
-  return { text: shown.text || full, full, known: shown.by !== 'как в WMS', by: shown.by };
 }
 
 const SOURCE_LABELS = {
@@ -1604,7 +1579,6 @@ function pkLoad(callback) {
     pkState.updatedAt = data.priemkaUpdatedAt || 0;
     pkState.cells = Array.isArray(data.priemkaCells) ? data.priemkaCells : [];
     pkState.sku = data.priemkaSku || {};
-    pkState.names = data.skuNameCache || {};
     pkState.missingCells = (data.priemkaMissingCells || []).map(String);
     pkRender();
     if (callback) callback();
@@ -1618,11 +1592,10 @@ function pkMatches(record, query, source) {
   if (!query) return true;
   // Ищем И по короткому названию, И по оригиналу: оператор набирает то
   // «мыло», то «sovun» — в зависимости от того, что у него перед глазами.
-  const short = pkShortName(record);
   const haystack = [
     record.cell, record.cellRaw, record.orderId, record.barcode, record.gm,
     record.clientName, record.phone, record.itemName, record.status,
-    short.text, short.full
+    pkSkuName(record)
   ].filter(Boolean).join(' ').toLowerCase();
   return haystack.includes(query);
 }
@@ -1648,11 +1621,7 @@ function pkCell(record, field, options = {}) {
   // который WMS отдаёт отдельным ответом. Связываем по ШК.
   let hint = null;
   if (!value && field === 'itemName' && record.barcode) {
-    const short = pkShortName(record);
-    value = short.text || '';
-    // Оригинал WMS показываем по наведению: он длинный и по-узбекски, но
-    // именно он написан на коробке, и иногда сверить надо именно с ним.
-    if (short.full && short.full !== value) hint = short.full;
+    value = pkSkuName(record);
   }
   if (!value) {
     td.textContent = '—';
@@ -1877,17 +1846,11 @@ document.getElementById('pk-btn-allocate').addEventListener('click', async () =>
     // Клиент неизвестен на многих экранах WMS — тогда группируем по заказу:
     // один заказ = один получатель, так что для целей раскладки это то же самое.
     client_id: record.clientId || record.clientName || record.phone || record.orderId || record.gm,
-    simplified_name: pkShortName(record).text || null,
+    simplified_name: pkSkuName(record) || null,
     // Тир размера — из НАСТОЯЩИХ габаритов справочника WMS, если они есть.
     // Без него раскладка считала всё самым мелким и не отличала баллончик
     // от коробки.
     size_tier: pkSizeTier(record) || undefined,
-    // ВЕС. WMS его не отдаёт вовсе, и до сих пор этаж выбирался только по
-    // размеру: пятилитровая канистра могла уехать на верхнюю полку. Теперь
-    // вес берётся из названия, где продавец его написал («5 kg», «700 g»),
-    // а где не написал — считается по объёму и виду товара. Это оценка, и
-    // от неё нужна не точность до килограмма, а правильная полка.
-    weight_estimate_kg: pkWeightKg(record),
   }));
 
   // Справочник WMS содержит ячейки, которых физически на ПВЗ нет. Проверено
